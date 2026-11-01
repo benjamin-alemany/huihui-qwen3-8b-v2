@@ -60,7 +60,7 @@ def make_state(pod, expected_image):
     gpu = pod.get("gpu", {})
     if (pod.get("name") != NAME or pod.get("image") != expected_image
             or pod.get("cloud") != "SECURE"
-            or gpu.get("id") != "NVIDIA GeForce RTX 3090" or gpu.get("count") != 1
+            or gpu.get("id") != "NVIDIA GeForce RTX 4090" or gpu.get("count") != 1
             or pod.get("locked")):
         raise ValueError("Pod does not match the approved deployment")
     state = {k: pod[k] for k in ("id", "name", "image", "createdAt")}

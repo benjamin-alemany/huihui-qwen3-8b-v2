@@ -16,7 +16,7 @@ from secure_middleware import BearerGate
 IMAGE = "example.com/user/qwen@sha256:" + "a" * 64
 POD = {"id": "pod-test", "name": watchdog.NAME, "image": IMAGE,
        "createdAt": "2026-10-31T00:00:00Z", "cloud": "SECURE",
-       "gpu": {"id": "NVIDIA GeForce RTX 3090", "count": 1},
+       "gpu": {"id": "NVIDIA GeForce RTX 4090", "count": 1},
        "locked": False, "status": "RUNNING", "actions": ["stop"]}
 
 

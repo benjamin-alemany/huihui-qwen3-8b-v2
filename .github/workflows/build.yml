@@ -40,7 +40,7 @@ jobs:
           image="ghcr.io/${owner}/huihui-qwen3-8b-v2"
           docker buildx build --platform linux/amd64 --push \
             --provenance=mode=min \
-            --tag "${image}:0.1.0" \
+            --tag "${image}:0.2.0" \
             --tag "${image}:sha-${GITHUB_SHA}" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --metadata-file /tmp/qwen-image-metadata.json .
