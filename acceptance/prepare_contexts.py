@@ -17,6 +17,7 @@ def prepare(destination):
         text = path.read_text()
         assert text.count('HOURS = 10\n') == 1
         text = text.replace('HOURS = 10\n', f'HOURS = {hours}\n')
+        text = text.replace('NVIDIA GeForce RTX 3090', 'NVIDIA A40')
         text = text.replace('NAME = "huihui-qwen3-8b-v2-10h"', f'NAME = "qwen-acceptance-{variant}"')
         path.write_text(text)
         if variant == 'backup-stop':
