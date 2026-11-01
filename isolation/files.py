@@ -34,6 +34,7 @@ class Project:
         info=os.fstat(self.fd)
         if info.st_uid!=os.getuid() or info.st_mode & 0o077:
             os.close(self.fd);raise Denied("Project root must be private and broker-owned")
+        self.device=info.st_dev
         self.lock=threading.RLock()
     def close(self):
         if self.fd is not None:os.close(self.fd);self.fd=None
@@ -46,6 +47,7 @@ class Project:
             for part in parts[:-1]:
                 nxt=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
                 os.close(fd);fd=nxt
+            if os.fstat(fd).st_dev!=self.device:raise Denied('Cross-device project path denied')
             yield fd,parts[-1]
         except OSError as exc:raise Denied("Path not accessible") from exc
         finally:os.close(fd)
@@ -54,7 +56,8 @@ class Project:
             try:fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
             except OSError as exc:raise Denied("File not accessible") from exc
             try:
-                regular(os.fstat(fd))
+                info=os.fstat(fd);regular(info)
+                if info.st_dev!=self.device or info.st_uid!=os.getuid():raise Denied('Foreign project file denied')
                 chunks=[];size=0
                 while True:
                     block=os.read(fd,min(8192,MAX_FILE+1-size))
@@ -78,6 +81,7 @@ class Project:
                 if nodes>MAX_FILES*2:raise Denied('Project entry quota exceeded')
                 path=prefix+name;components(path)
                 info=os.stat(name,dir_fd=fd,follow_symlinks=False)
+                if info.st_dev!=self.device or info.st_uid!=os.getuid():raise Denied('Foreign project entry denied')
                 if stat.S_ISDIR(info.st_mode):
                     sub=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
                     try:walk(sub,path+'/')

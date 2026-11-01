@@ -8,6 +8,7 @@ class Broker:
     def dispatch(self,request):
         if not isinstance(request,dict):raise Denied('Object required')
         operation=request.get('operation')
+        if not isinstance(operation,str):raise Denied('Operation must be a string')
         schema={'read':{'operation','path'},'write':{'operation','path','text','expected_sha256'},'test':{'operation'}}
         if operation not in schema or set(request)!=schema[operation]:raise Denied('Unknown operation or parameters')
         if operation=='read':return self.project.read(request['path'])
