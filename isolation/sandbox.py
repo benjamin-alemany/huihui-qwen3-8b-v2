@@ -62,8 +62,8 @@ def command(runtime,bwrap,project,filter_fd):
     return [str(bwrap),'--die-with-parent','--new-session','--unshare-user','--unshare-pid',
       '--unshare-net','--unshare-ipc','--unshare-uts','--disable-userns','--cap-drop','ALL',
       '--clearenv','--ro-bind',str(Path(runtime)/'rootfs'),'/',
-      '--ro-bind',str(project),'/project','--proc','/proc','--dev','/dev',
-      '--size','16777216','--tmpfs','/tmp','--chdir','/project',
+      '--ro-bind',str(project),'/project','--proc','/proc','--remount-ro','/proc','--dev','/dev','--remount-ro','/dev',
+      '--size','16777216','--tmpfs','/tmp','--remount-ro','/tmp','--chdir','/project',
       '--setenv','HOME','/home/runner','--setenv','PATH','/usr/bin',
       '--setenv','LANG','C.UTF-8','--setenv','PYTHONHASHSEED','0',
       '--seccomp',str(filter_fd),'--',*TEST_COMMAND]

@@ -34,6 +34,12 @@ def export_filter(path,lockdown=False):
             number=lib.seccomp_syscall_resolve_name(name.encode())
             if number<0:continue # Different native architectures/older libseccomp.
             if lib.seccomp_rule_add(ctx,0x00050000|errno.EPERM if lockdown else 0x7fff0000,number,0)!=0:raise RuntimeError('seccomp rule failed: '+name)
+        if not lockdown:
+            # CPython uses EACCES to select fcntl for close-on-exec bookkeeping.
+            # All ioctl requests remain denied, including terminal/device ioctls.
+            number=lib.seccomp_syscall_resolve_name(b'ioctl')
+            if number<0 or lib.seccomp_rule_add(ctx,0x00050000|errno.EACCES,number,0)!=0:
+                raise RuntimeError('ioctl denial rule failed')
         with Path(path).open('xb') as out:
             if lib.seccomp_export_bpf(ctx,out.fileno())!=0:raise RuntimeError('seccomp export failed')
     finally:lib.seccomp_release(ctx)

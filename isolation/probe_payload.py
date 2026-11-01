@@ -1,6 +1,8 @@
 """Trusted verification code copied into disposable scratch; no real credentials."""
 import ctypes
 import errno
+import fcntl
+import termios
 import json
 import os
 import resource
@@ -32,7 +34,9 @@ class Boundaries(unittest.TestCase):
         for path in ('/project/test_boundaries.py','/usr/bin/python3','/etc/passwd'):
             with self.assertRaises(OSError):open(path,'ab')
         self.assertEqual(os.statvfs('/tmp').f_blocks*os.statvfs('/tmp').f_frsize,16*1024*1024)
-        Path('/tmp/scratch.txt').write_text('disposable')
+        with self.assertRaises(OSError):Path('/tmp/scratch.txt').write_text('disposable')
+        with self.assertRaises(OSError):Path('/dev/untrusted-file').write_text('disposable')
+        with self.assertRaises(PermissionError):fcntl.ioctl(0,termios.TIOCSTI,b'x')
     def test_no_fork_namespace_changes_or_ptrace(self):
         with self.assertRaises(PermissionError):os.fork()
         with self.assertRaises(PermissionError):os.execve('/usr/bin/python3',['python3','-I','-c','raise SystemExit(97)'],{})
