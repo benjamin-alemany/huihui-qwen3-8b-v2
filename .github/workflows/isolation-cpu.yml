@@ -1,0 +1,45 @@
+name: Isolation CPU verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: qwen-isolation-cpu
+  cancel-in-progress: false
+jobs:
+  verify:
+    # Standard public-repository runner only; no artifacts, cache, GPU or cloud keys.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Check broker boundaries without executing project code
+        run: /usr/bin/python3 -B -m unittest discover -s isolation/tests -v
+      - name: Install trusted CPU build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc meson ninja-build pkg-config libcap-dev libseccomp2
+      - name: Build checksum-pinned non-setuid bubblewrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL https://github.com/containers/bubblewrap/releases/download/v0.13.1/bubblewrap-0.13.1.tar.xz -o /tmp/bubblewrap.tar.xz
+          printf '%s  %s\n' '0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d' '/tmp/bubblewrap.tar.xz' | sha256sum -c -
+          mkdir /tmp/qwen-bwrap-build
+          tar -xJf /tmp/bubblewrap.tar.xz -C /tmp/qwen-bwrap-build --strip-components=1
+          meson setup /tmp/qwen-bwrap-build/build /tmp/qwen-bwrap-build --prefix=/opt/qwen-sandbox-tools --buildtype=release -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled -Dselinux=disabled
+          ninja -C /tmp/qwen-bwrap-build/build
+          sudo ninja -C /tmp/qwen-bwrap-build/build install
+          test ! -u /opt/qwen-sandbox-tools/bin/bwrap
+          /opt/qwen-sandbox-tools/bin/bwrap --version
+      - name: Prepare sealed minimal Python runtime and seccomp filter
+        run: sudo /usr/bin/python3 -B -m isolation.prepare_runtime /opt/qwen-isolation-ci
+      - name: Verify actual OS boundaries as unprivileged user
+        env:
+          RUNPOD_API_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
+          VLLM_API_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
+          AWS_SECRET_ACCESS_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
+        run: /usr/bin/python3 -B -m isolation.verify --runtime /opt/qwen-isolation-ci --bwrap /opt/qwen-sandbox-tools/bin/bwrap
