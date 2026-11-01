@@ -20,6 +20,21 @@ def prepare(destination):
         text = text.replace('NVIDIA GeForce RTX 3090', 'NVIDIA A40')
         text = text.replace('NAME = "huihui-qwen3-8b-v2-10h"', f'NAME = "qwen-acceptance-{variant}"')
         path.write_text(text)
+        if variant == 'self-stop':
+            path = target / 'start.py'
+            text = path.read_text()
+            original = '    os.execvp("vllm", arguments())'
+            assert text.count(original) == 1
+            probe = """    import json
+    import torch
+    print('ACCEPTANCE_GPU ' + json.dumps({
+        'uid': os.getuid(), 'gid': os.getgid(),
+        'control_key_present': bool(os.environ.get('RUNPOD_API_KEY')),
+        'gpu': torch.cuda.get_device_name(0),
+        'vram_bytes': torch.cuda.get_device_properties(0).total_memory,
+    }), flush=True)
+    os.execvp("vllm", arguments())"""
+            path.write_text(text.replace(original, probe))
         if variant == 'backup-stop':
             # Only the control path is tested in phase two; no second weight load.
             path = target / 'supervisor.py'
