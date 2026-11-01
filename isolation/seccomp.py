@@ -17,7 +17,7 @@ getcwd chdir fchdir uname sysinfo getrlimit prlimit64 getrusage
 sched_getaffinity sched_yield poll ppoll select pselect6
 mkdir mkdirat rmdir unlink unlinkat rename renameat renameat2
 fsync fdatasync ftruncate truncate umask
-seccomp execve exit exit_group restart_syscall
+seccomp execve wait4 waitid exit exit_group restart_syscall
 """.split()
 
 def export_filter(path,lockdown=False):
