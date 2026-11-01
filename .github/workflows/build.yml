@@ -1,0 +1,56 @@
+name: Build and publish
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: qwen-container-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Standard runner only: public-repository usage is free. No larger runner.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Require public repository for the no-charge build route
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+        run: test "$VISIBILITY" = public
+      - name: Test security and stop logic without a GPU
+        run: python3 -B -m unittest discover -s tests -v
+      - name: Create temporary builder
+        run: docker buildx create --name qwen-cloud-builder --driver docker-container --use
+      - name: Sign in to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Build remotely and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/${owner}/huihui-qwen3-8b-v2"
+          docker buildx build --platform linux/amd64 --push \
+            --provenance=mode=min \
+            --tag "${image}:0.1.0" \
+            --tag "${image}:sha-${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --metadata-file /tmp/qwen-image-metadata.json .
+          IMAGE="$image" python3 - <<'PY'
+          import json, os
+          metadata = json.load(open('/tmp/qwen-image-metadata.json'))
+          ref = os.environ['IMAGE'] + '@' + metadata['containerimage.digest']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as report:
+              report.write('Built image: `' + ref + '`\n\nNo Runpod resource was created.\n')
+          PY
+      - name: Remove temporary registry login
+        if: always()
+        run: docker logout ghcr.io
