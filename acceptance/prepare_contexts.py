@@ -8,7 +8,7 @@ FILES = ('Dockerfile', '.dockerignore', 'start.py', 'secure_middleware.py', 'wat
 
 def prepare(destination):
     results = {}
-    for variant, hours in [('self-stop', 0.5), ('backup-stop', 0.25)]:
+    for variant, hours in [('self-stop', 0.25), ('backup-stop', 7 / 60)]:
         target = Path(destination) / variant
         target.mkdir(parents=True, exist_ok=True)
         for filename in FILES:
