@@ -33,6 +33,11 @@ class PolicyTests(unittest.TestCase):
    for i in range(MAX_FILES*2+1):(Path(td)/('d'+str(i))).mkdir()
    with Project(td) as p:
     with self.assertRaises(Denied):p.entries()
+ def test_second_filter_failure_cannot_import_project_tests(self):
+  from isolation import test_runner
+  with patch.object(test_runner,'lock_execution',side_effect=RuntimeError('filter unavailable')),patch.object(test_runner.unittest.defaultTestLoader,'discover') as discover:
+   with self.assertRaises(RuntimeError):test_runner.main()
+   discover.assert_not_called()
  def test_wrong_request_types_are_denied(self):
   with tempfile.TemporaryDirectory() as td:
    with Project(td) as p:

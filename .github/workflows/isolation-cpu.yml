@@ -37,9 +37,16 @@ jobs:
           /usr/lib/qwen-sandbox-tools/bin/bwrap --version
       - name: Prepare sealed minimal Python runtime and seccomp filter
         run: sudo /usr/bin/python3 -B -m isolation.prepare_runtime /usr/lib/qwen-isolation-ci
+      - name: Prepare dedicated unprivileged executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if getent passwd 10004; then echo 'Executor UID already occupied; refusing reuse'; exit 1; fi
+          sudo useradd --uid 10004 --no-create-home --shell /usr/sbin/nologin qwen-executor
+          sudo mkdir -p /usr/lib/qwen-isolation-code
+          sudo cp -R isolation /usr/lib/qwen-isolation-code/
+          sudo chown -R root:root /usr/lib/qwen-isolation-code
+          sudo chmod -R go-w /usr/lib/qwen-isolation-code
+          cat /proc/sys/user/max_user_namespaces
       - name: Verify actual OS boundaries as unprivileged user
-        env:
-          RUNPOD_API_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
-          VLLM_API_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
-          AWS_SECRET_ACCESS_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
-        run: /usr/bin/python3 -B -m isolation.verify --runtime /usr/lib/qwen-isolation-ci --bwrap /usr/lib/qwen-sandbox-tools/bin/bwrap
+        run: sudo -u qwen-executor env PYTHONPATH=/usr/lib/qwen-isolation-code RUNPOD_API_KEY=DUMMY-NOT-A-REAL-CREDENTIAL VLLM_API_KEY=DUMMY-NOT-A-REAL-CREDENTIAL AWS_SECRET_ACCESS_KEY=DUMMY-NOT-A-REAL-CREDENTIAL /usr/bin/python3 -B -m isolation.verify --runtime /usr/lib/qwen-isolation-ci --bwrap /usr/lib/qwen-sandbox-tools/bin/bwrap
