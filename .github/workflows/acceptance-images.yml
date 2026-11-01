@@ -1,0 +1,53 @@
+name: Build acceptance images
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: qwen-acceptance-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Require public repository
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+        run: test "$VISIBILITY" = public
+      - name: Verify production safety logic and generate isolated test contexts
+        run: |
+          python3 -B -m unittest discover -s tests -v
+          python3 acceptance/prepare_contexts.py /tmp/qwen-acceptance
+          python3 -m compileall -q /tmp/qwen-acceptance
+      - name: Create temporary builder
+        run: docker buildx create --name qwen-test-builder --driver docker-container --use
+      - name: Registry login
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish only test tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          for variant in self-stop backup-stop; do
+            image="ghcr.io/${owner}/huihui-qwen3-8b-v2"
+            docker buildx build --platform linux/amd64 --push --provenance=mode=min \
+              --tag "${image}:test-${variant}-${GITHUB_SHA}" \
+              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+              --metadata-file "/tmp/${variant}.json" "/tmp/qwen-acceptance/${variant}"
+            IMAGE="$image" VARIANT="$variant" python3 - <<'PY'
+          import json, os
+          metadata = json.load(open('/tmp/' + os.environ['VARIANT'] + '.json'))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as report:
+              report.write(os.environ['VARIANT'] + ': `' + os.environ['IMAGE'] + '@' + metadata['containerimage.digest'] + '`\n\n')
+          PY
+          done
+      - name: Remove login
+        if: always()
+        run: docker logout ghcr.io
