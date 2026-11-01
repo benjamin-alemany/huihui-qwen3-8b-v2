@@ -1,0 +1,41 @@
+name: Runtime CLI smoke check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Require public repository
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+        run: test "$VISIBILITY" = public
+      - name: Free disposable runner SDK space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          df -h /
+          python3 - <<'PY'
+          import shutil
+          assert shutil.disk_usage('/').free > 40 * 1024**3, 'Need enough ephemeral disk; never use a paid larger runner'
+          PY
+      - name: Inspect real runtime without model download or GPU
+        run: |
+          image='ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:f783362fa8fd41925f12a5d6f9c6f235a2ac1989814bd52b93cb5d837c85d597'
+          docker pull "$image"
+          docker run --rm --user 10001:10001 --entrypoint python3 "$image" -c 'import os, torch; print("uid",os.getuid(),"torch",torch.__version__,"CUDA visible",torch.cuda.is_available())'
+          docker run --rm --user 10001:10001 --entrypoint vllm "$image" serve --help > /tmp/vllm-help.txt
+          docker run --rm --entrypoint cat "$image" /opt/qwen/start.py > /tmp/start.py
+          python3 - <<'PY'
+          import importlib.util
+          spec=importlib.util.spec_from_file_location('start','/tmp/start.py'); m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          help_text=open('/tmp/vllm-help.txt').read()
+          missing=[x for x in m.arguments() if x.startswith('--') and x not in help_text]
+          print('Flags absent from actual help:', missing)
+          print(help_text[:2000])
+          assert not missing, 'Fix runtime flags before another GPU attempt'
+          PY
