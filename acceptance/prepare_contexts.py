@@ -20,6 +20,13 @@ def prepare(destination):
         text = text.replace('NVIDIA GeForce RTX 3090', 'NVIDIA A40')
         text = text.replace('NAME = "huihui-qwen3-8b-v2-10h"', f'NAME = "qwen-acceptance-{variant}"')
         path.write_text(text)
+        # Preserve failed-child logs briefly for live diagnostics before STOP.
+        path = target / 'supervisor.py'
+        text = path.read_text()
+        original = '            failed = child is not None and child.poll() is not None'
+        assert text.count(original) == 1
+        text = text.replace(original, original + '\n            if failed and not stop_requested:\n                print("ACCEPTANCE_CHILD_EXIT " + str(child.returncode), flush=True)\n                sleep(30)')
+        path.write_text(text)
         if variant == 'self-stop':
             path = target / 'start.py'
             text = path.read_text()
