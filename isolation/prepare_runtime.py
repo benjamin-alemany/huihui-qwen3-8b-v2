@@ -8,7 +8,7 @@ import subprocess
 import sys
 import sysconfig
 from pathlib import Path
-from isolation.seccomp import export_filter
+from isolation.seccomp import export_filter,native_seccomp_number
 
 def prepare(destination):
     if sys.platform!='linux' or os.geteuid()!=0:raise RuntimeError('Trusted Linux root build stage required')
@@ -40,6 +40,9 @@ def prepare(destination):
     (fs/'etc/passwd').write_text('runner:x:10004:10004:executor:/home/runner:/nonexistent\n')
     (fs/'etc/group').write_text('runner:x:10004:\n')
     export_filter(dst/'seccomp.bpf')
+    export_filter(fs/'opt/no-exec.bpf',lockdown=True)
+    (fs/'opt/seccomp-number.txt').write_text(str(native_seccomp_number()))
+    copy_file(Path(__file__).parent/'test_runner.py','/opt/test-runner.py')
     for p in dst.rglob('*'):
         if p.is_dir():p.chmod(0o555)
         else:p.chmod(0o555 if os.access(p,os.X_OK) else 0o444)

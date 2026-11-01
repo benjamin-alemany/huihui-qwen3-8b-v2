@@ -15,7 +15,7 @@ from pathlib import Path
 class Unavailable(RuntimeError):pass
 
 # Fixed command, never parsed from a tool request or model response.
-TEST_COMMAND=('/usr/bin/python3','-I','-B','-m','unittest','discover','-s','/project','-p','test_*.py','-v')
+TEST_COMMAND=('/usr/bin/python3','-I','-B','/opt/test-runner.py')
 WALL_SECONDS=8
 OUTPUT_BYTES=65536
 
@@ -25,7 +25,7 @@ def trusted(path,directory=False):
     current=path
     while True:
         info=current.lstat()
-        if info.st_uid!=0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):raise Unavailable('Runtime/policy must be root-owned and not writable')
+        if info.st_uid!=0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):raise Unavailable('Runtime/policy must be root-owned and not writable: '+str(current))
         if current.parent==current:break
         current=current.parent
     info=path.stat()
@@ -46,7 +46,7 @@ def validate_runtime(runtime,bwrap):
     for name,want in manifest.items():
         if not isinstance(name,str) or name.startswith('/') or '..' in name.split('/'):raise Unavailable('Invalid manifest path')
         if hashlib.sha256((runtime/name).read_bytes()).hexdigest()!=want:raise Unavailable('Runtime digest mismatch')
-    for needed in ('seccomp.bpf','rootfs/usr/bin/python3'):
+    for needed in ('seccomp.bpf','rootfs/usr/bin/python3','rootfs/opt/no-exec.bpf','rootfs/opt/test-runner.py','rootfs/opt/seccomp-number.txt'):
         if needed not in manifest:raise Unavailable('Incomplete runtime')
     return hashlib.sha256(manifest_path.read_bytes()).hexdigest()
 

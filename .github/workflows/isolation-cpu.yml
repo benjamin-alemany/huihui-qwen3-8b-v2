@@ -30,16 +30,16 @@ jobs:
           printf '%s  %s\n' '0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d' '/tmp/bubblewrap.tar.xz' | sha256sum -c -
           mkdir /tmp/qwen-bwrap-build
           tar -xJf /tmp/bubblewrap.tar.xz -C /tmp/qwen-bwrap-build --strip-components=1
-          meson setup /tmp/qwen-bwrap-build/build /tmp/qwen-bwrap-build --prefix=/opt/qwen-sandbox-tools --buildtype=release -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled -Dselinux=disabled
+          meson setup /tmp/qwen-bwrap-build/build /tmp/qwen-bwrap-build --prefix=/usr/lib/qwen-sandbox-tools --buildtype=release -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled -Dselinux=disabled
           ninja -C /tmp/qwen-bwrap-build/build
           sudo ninja -C /tmp/qwen-bwrap-build/build install
-          test ! -u /opt/qwen-sandbox-tools/bin/bwrap
-          /opt/qwen-sandbox-tools/bin/bwrap --version
+          test ! -u /usr/lib/qwen-sandbox-tools/bin/bwrap
+          /usr/lib/qwen-sandbox-tools/bin/bwrap --version
       - name: Prepare sealed minimal Python runtime and seccomp filter
-        run: sudo /usr/bin/python3 -B -m isolation.prepare_runtime /opt/qwen-isolation-ci
+        run: sudo /usr/bin/python3 -B -m isolation.prepare_runtime /usr/lib/qwen-isolation-ci
       - name: Verify actual OS boundaries as unprivileged user
         env:
           RUNPOD_API_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
           VLLM_API_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
           AWS_SECRET_ACCESS_KEY: DUMMY-NOT-A-REAL-CREDENTIAL
-        run: /usr/bin/python3 -B -m isolation.verify --runtime /opt/qwen-isolation-ci --bwrap /opt/qwen-sandbox-tools/bin/bwrap
+        run: /usr/bin/python3 -B -m isolation.verify --runtime /usr/lib/qwen-isolation-ci --bwrap /usr/lib/qwen-sandbox-tools/bin/bwrap

@@ -35,6 +35,7 @@ class Boundaries(unittest.TestCase):
         Path('/tmp/scratch.txt').write_text('disposable')
     def test_no_fork_namespace_changes_or_ptrace(self):
         with self.assertRaises(PermissionError):os.fork()
+        with self.assertRaises(PermissionError):os.execve('/usr/bin/python3',['python3','-I','-c','raise SystemExit(97)'],{})
         libc=ctypes.CDLL(None,use_errno=True)
         self.assertEqual(libc.unshare(0x40000000),-1);self.assertEqual(ctypes.get_errno(),errno.EPERM)
         self.assertEqual(libc.ptrace(0,0,None,None),-1);self.assertEqual(ctypes.get_errno(),errno.EPERM)
