@@ -16,7 +16,7 @@ def arguments():
         "--max-model-len", "4096", "--max-num-seqs", "1",
         "--gpu-memory-utilization", "0.90", "--enforce-eager",
         "--host", "0.0.0.0", "--port", "8000",
-        "--disable-log-requests", "--disable-log-outputs",
+        "--no-enable-log-requests", "--no-enable-log-outputs",
         "--disable-fastapi-docs", "--disable-uvicorn-access-log",
         "--middleware", "secure_middleware.BearerGate",
     ]
