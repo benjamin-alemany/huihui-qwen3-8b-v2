@@ -68,6 +68,25 @@ class LinuxBoundaryTests(unittest.TestCase):
             env={}, capture_output=True, text=True, timeout=15)
         self.failed(result)
 
+    def test_writable_application_refuses_bootstrap(self):
+        path = Path("/opt/qwen/credential_probe.py")
+        original = path.stat().st_mode
+        path.chmod(0o666)
+        try:
+            result = subprocess.run([PYTHON,"-I","-S","-B","/opt/qwen/credential_boot.py","--probe"],
+                env={"RUNPOD_API_KEY":DUMMY},capture_output=True,text=True,timeout=15)
+            self.failed(result)
+            self.assertIn("Credential bootstrap refused", result.stderr)
+        finally:
+            path.chmod(original)
+
+    def test_inference_cannot_modify_application(self):
+        code = "open('/opt/qwen/credential_boot.py','ab')"
+        result = subprocess.run([PYTHON,"-I","-S","-B","-c",code],env=self.clean_env(),
+            preexec_fn=boundary.drop_privileges,capture_output=True,text=True,timeout=15)
+        self.failed(result)
+        self.assertIn("PermissionError", result.stderr)
+
     def test_pop_without_exec_still_refuses_stale_proc_environment(self):
         code = "import sys,os;sys.path.insert(0,'/opt/qwen');import credential_boundary as b;os.environ.pop('RUNPOD_API_KEY');b.assert_clean_boot()"
         result = subprocess.run([PYTHON, "-I", "-S", "-B", "-c", code],
