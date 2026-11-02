@@ -7,6 +7,7 @@ import ctypes
 import os
 from pathlib import Path
 import resource
+import stat
 import sys
 
 class BoundaryError(ValueError):
@@ -87,6 +88,14 @@ def assert_clean_boot():
     if set(os.environ) - (BOOT_KEYS | {"PATH", "LANG", "LC_ALL"}):
         raise BoundaryError("Clean exec bootstrap required")
     protect_process()
+
+
+def assert_trusted_application(directory):
+    directory = Path(directory)
+    for path in [directory, *directory.parents, *directory.glob("*.py")]:
+        info = path.lstat()
+        if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+            raise BoundaryError("Application code or parent directory is writable or untrusted")
 
 
 def close_inherited_fds():

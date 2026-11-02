@@ -85,10 +85,22 @@ class LinuxBoundaryTests(unittest.TestCase):
         self.failed(self.child(preexec=unsafe_drop), "Inference retained privileges")
 
     def test_saved_root_identity_refused(self):
-        def unsafe_drop():
-            boundary.prctl(38,1);os.setgroups([]);os.setresgid(10001,10001,0);os.setresuid(10001,10001,0)
-            resource.setrlimit(resource.RLIMIT_CORE, (0,0))
-        self.failed(self.child(preexec=unsafe_drop), "Unexpected inference credentials")
+        # exec resets saved IDs to effective IDs. Use a real fork without exec
+        # to retain the unsafe saved-root identity at the verification point.
+        pid = os.fork()
+        if pid == 0:
+            try:
+                boundary.prctl(38,1);os.setgroups([])
+                os.setresgid(10001,10001,0);os.setresuid(10001,10001,0)
+                boundary.verify_child()
+            except boundary.BoundaryError as exc:
+                os._exit(0 if str(exc) == "Unexpected inference credentials" else 3)
+            except Exception:
+                os._exit(4)
+            os._exit(5)
+        _, status = os.waitpid(pid, 0)
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status), 0)
 
     def test_supplementary_root_group_refused(self):
         def unsafe_drop():

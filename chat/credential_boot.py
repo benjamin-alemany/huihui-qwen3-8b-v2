@@ -12,6 +12,7 @@ def main():
     if os.geteuid() != 0 or sys.argv[1:] not in ([], ["--probe"]):
         raise ValueError("Root fixed bootstrap required; arbitrary commands are forbidden")
     boundary.protect_process()
+    boundary.assert_trusted_application(HERE)
     clean = boundary.boot_environment(os.environ)
     # exec replaces the original address space AND /proc initial environment.
     # pop()/unsetenv() alone does neither reliably. No key values are logged.
