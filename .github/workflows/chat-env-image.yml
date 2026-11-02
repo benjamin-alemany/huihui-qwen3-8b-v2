@@ -1,0 +1,44 @@
+name: Build names-only environment diagnostic image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: qwen-chat-env-image
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify names-only output with dummy credentials
+        run: python3 -B chat/diagnostic/test_report.py
+      - name: Create temporary builder
+        run: docker buildx create --name qwen-chat-env-builder --driver docker-container --use
+      - name: Authenticate registry push only
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Build fixed diagnostic only; never execute it on a Pod
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2"
+          docker buildx build --platform linux/amd64 --provenance=false --push \
+            --metadata-file /tmp/chat-env-image.json --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${image}:chat-env-${GITHUB_SHA}" -f chat/diagnostic/Dockerfile chat/diagnostic
+          IMAGE="$image" python3 - <<'PY'
+          import json,os
+          digest=json.load(open('/tmp/chat-env-image.json'))['containerimage.digest']
+          print('DIAGNOSTIC_IMAGE='+os.environ['IMAGE']+'@'+digest)
+          print('SOURCE_SHA='+os.environ['GITHUB_SHA'])
+          print('No Runpod, model, GPU, cloud key, artifact or cache used.')
+          PY
+      - name: Remove temporary registry login
+        if: always()
+        run: docker logout ghcr.io
