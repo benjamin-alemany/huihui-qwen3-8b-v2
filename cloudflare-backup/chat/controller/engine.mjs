@@ -96,7 +96,16 @@ export class SessionEngine {
         const pods=(await this.d.provider.list()).filter(p=>podMatches(p,s.reservation));
         for(const p of pods)validatePod(p,s.reservation,Infinity);
         if(s.createAttempted&&!pods.length){
-          if(s.pod){await this.finish(s,'stopped');return;}
+          if(s.pod){
+            // Inventory filtering is not proof that the known Pod was deleted.
+            // A changed identity or incomplete list must retain its budget hold.
+            const known=await this.d.provider.get(s.pod.id);
+            if(known){
+              validatePod(known,s.reservation,Infinity);
+              throw new SessionError('POD_ABSENCE_UNCONFIRMED',503);
+            }
+            await this.finish(s,'stopped');return;
+          }
           const reports=await Promise.all(this.d.guards.map(g=>g.report()));
           if(reports.some(r=>r.name===s.reservation.name&&r.deleted?.length)){
             for(const report of reports)for(const p of report.deleted??[])validatePod(p,s.reservation,s.quote.gpuHourlyUSD);
