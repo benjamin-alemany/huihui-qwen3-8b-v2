@@ -100,3 +100,27 @@ test('Start and Stop commit their wakeup atomically with state, without an exter
  // Stop fans out only after its durable cancellation+wakeup transaction.
  await assert.rejects(h.engine().stop({sessionId:s.id}));assert.equal((await h.engine().status()).session.stopRequested,true);assert.equal(h.store.data.get('$alarm'),h.now+100);assert.equal(h.creates,0);
 });
+
+test('known Pod identity change cannot be reported as verified cleanup',async()=>{
+ const h=harness();await h.ready();const before=(await h.engine().status()).budget.reservedUSD;
+ h.set({pods:h.pods.map(p=>({...p,name:p.name+'-renamed'}))});
+ await h.engine().tick();const status=await h.engine().status();
+ assert.equal(status.session.phase,'stopping');assert.equal(status.session.cleanupVerified,false);
+ assert.equal(status.budget.reservedUSD,before);assert.equal(h.pods.length,1);
+ assert.ok(h.guardState.every(Boolean));assert.equal(await h.engine().context(),null);
+ assert.ok(!h.calls.some(c=>c[0]==='cleanup'));
+});
+test('list omission of a known live Pod is not verified deletion',async()=>{
+ const h=harness();await h.ready();const before=(await h.engine().status()).budget.reservedUSD;
+ h.provider.list=async()=>[];
+ await h.engine().tick();const status=await h.engine().status();
+ assert.equal(status.session.phase,'stopping');assert.equal(status.session.cleanupVerified,false);
+ assert.equal(status.budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));assert.equal(h.pods.length,1);
+});
+test('known Pod get failure retains the hold and both guards',async()=>{
+ const h=harness();await h.ready();const before=(await h.engine().status()).budget.reservedUSD;
+ h.set({pods:[]});h.provider.get=async()=>{throw Error('503');};
+ await h.engine().tick();const status=await h.engine().status();
+ assert.equal(status.session.phase,'stopping');assert.equal(status.session.cleanupVerified,false);
+ assert.equal(status.budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));
+});
