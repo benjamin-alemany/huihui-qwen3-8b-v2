@@ -14,5 +14,7 @@ credentials, real routes, private billing state or saved chats. Never deploy the
 examples or apply their seeds to a production ledger. Source changes require
 review and a separately authorized private deployment.
 
-Run `bash .codex/setup.sh` from the repository root for the 63 local dummy tests.
+Run `bash .codex/setup.sh` from the repository root to install without lifecycle
+scripts, then `bash .codex/test.sh` for the OS-isolated dummy suite. See
+`docs/TESTING-AND-RECOVERY.md` for the boundary and backup/restore behavior.
 The existing model-serving image is unchanged; there is no model/GPU work in setup.
