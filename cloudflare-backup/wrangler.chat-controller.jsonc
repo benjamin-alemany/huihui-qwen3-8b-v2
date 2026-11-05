@@ -1,0 +1,55 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unjailed-chat-controller",
+  "main": "chat/controller/worker.mjs",
+  "compatibility_date": "2026-10-30",
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSION_CONTROLLER",
+        "class_name": "ChatSessionController"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "ChatSessionController"
+      ]
+    }
+  ],
+  "vars": {
+    "READINESS_ENABLED": "true",
+    "START_ENABLED": "false",
+    "APPROVED_ACCEPTANCE_ID": "",
+    "PREPARED_CATALOG": "{\"id\":\"NVIDIA A40\",\"secure\":true,\"price\":{\"secure\":0.59},\"availability\":\"NONE\"}",
+    "MAX_SESSION_HOURLY_USD": "0.60",
+    "MAX_ACCEPTANCE_USD": "0.25"
+  },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false
+    },
+    "traces": {
+      "enabled": true
+    }
+  },
+  "services": [
+    {
+      "binding": "PRIMARY_GUARD",
+      "service": "unjailed-chat-stop-primary",
+      "entrypoint": "GuardAdmin"
+    },
+    {
+      "binding": "BACKUP_GUARD",
+      "service": "unjailed-chat-stop-backup",
+      "entrypoint": "GuardAdmin"
+    }
+  ]
+}

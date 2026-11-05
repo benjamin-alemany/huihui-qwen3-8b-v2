@@ -1,0 +1,67 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unjailed-private-chat",
+  "main": "chat/worker.mjs",
+  "compatibility_date": "2026-10-30",
+  "workers_dev": false,
+  "preview_urls": false,
+  "services": [
+    {
+      "binding": "CONTROLLER",
+      "service": "unjailed-chat-controller",
+      "entrypoint": "OwnerReadiness"
+    },
+    {
+      "binding": "INFERENCE_CONTROLLER",
+      "service": "unjailed-chat-controller",
+      "entrypoint": "ChatInference"
+    }
+  ],
+  "assets": {
+    "directory": "chat/site",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_QUOTA",
+        "class_name": "ChatQuota"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "ChatQuota"
+      ]
+    }
+  ],
+  "vars": {
+    "CHAT_ORIGIN": "https://unjailed.work",
+    "CHAT_ENABLED": "false",
+    "ACCESS_ISSUER": "https://unjailed-dummy-test.cloudflareaccess.com",
+    "ACCESS_AUD": "dummy-chat-audience",
+    "OWNER_EMAIL": "owner@example.test",
+    "CHAT_STATUS": "Validation passed. GPU is off. Saved chats and drafts remain available; new GPU sessions are not enabled yet.",
+    "HISTORY_ENABLED": "true",
+    "SESSION_CONTROLLER_ENABLED": "true"
+  },
+  "triggers": {
+    "crons": []
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  }
+}

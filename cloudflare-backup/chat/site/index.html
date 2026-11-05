@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unjailed · Private chat</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/session.js" defer></script></head>
+<body><main>
+<header><strong>UNJAILED</strong><span>Private Qwen chat</span><span class="pill">Chat only</span></header>
+<section class="intro"><p class="eyebrow">YOUR CLOUD SESSION</p><h1>A space to think.</h1><p>Talk with Qwen. Terminal and agent execution are disabled.</p></section>
+<section class="session" aria-label="Session"><p id="session" role="status">Checking private session…</p><p id="clock"></p><p class="muted">Chat runs in the cloud during an armed session. Closing this tab does not stop GPU billing; the cloud deadline handles shutdown.</p><button id="check-guards" type="button" disabled>Check session safeguards</button><p id="guard-status" class="muted" role="status">Cloud safeguard verification is being connected. This check does not start a GPU.</p></section>
+<section class="session-controls" aria-label="Timed session controls">
+ <h2>Your timed session</h2><p class="muted">18 minutes from launch, including startup. Stop closes chat and removes the temporary GPU and disk. Saved chats remain available.</p>
+ <p id="control-status" role="status">Connecting to the cloud controller…</p><p id="budget" class="muted"></p>
+ <div class="actions"><button id="quote" type="button" disabled>Review session cost</button><button id="stop-session" type="button" disabled>Stop session</button></div>
+ <div id="quote-panel" hidden><p id="quote-price"></p><p id="quote-detail" class="muted"></p><label class="cost-consent"><input id="accept-cost" type="checkbox"> <span id="consent-label">Approve the displayed session allowance</span></label><button id="start-session" type="button" disabled>Start timed session</button></div>
+</section>
+<section id="messages" aria-label="Conversation" aria-live="polite"><p id="empty" class="muted">Your conversation will appear here.</p></section>
+<form id="composer"><label for="message">Message Qwen</label><textarea id="message" rows="4" maxlength="3000" placeholder="What would you like to explore?" disabled required></textarea><div class="actions"><span id="notice" role="status">No active session is configured.</span><button id="send" disabled>Send message</button></div></form>
+<div class="secondary"><button id="clear" type="button">New chat</button><button id="export" type="button">Export text</button><button id="save" type="button" disabled>Save chat</button><button id="saved" type="button" disabled>Saved chats</button><a href="/cdn-cgi/access/logout">Sign out</a></div>
+<section id="saved-panel" hidden aria-label="Saved conversations"><h2>Saved chats</h2><p class="muted">Save up to 20 conversations in your private Cloudflare storage. Saves are manual; no separate backup is configured.</p><div id="saved-list"></div></section>
+<footer>Replies are untrusted plain text. No browsing, shell commands, file access, or tool calls are available. Messages stay in this tab unless you choose Save chat or Export text. Saved chats remain available after reload and when the GPU is off. Avoid sharing secrets.</footer>
+</main></body></html>

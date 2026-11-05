@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unjailed-chat-stop-primary",
+  "main": "chat/controller/guard.mjs",
+  "compatibility_date": "2026-10-30",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "CHAT_STOP_ROLE": "primary",
+    "GUARD_ARM_ENABLED": "false"
+  },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "traces": {
+      "enabled": true
+    }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "STOP_RESERVATION",
+        "class_name": "StopReservation"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "StopReservation"
+      ]
+    }
+  ]
+}

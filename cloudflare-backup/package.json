@@ -1,0 +1,24 @@
+{
+  "name": "unjailed-chat-development",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:controller": "node --test chat/controller/engine.test.mjs chat/controller/runpod.test.mjs chat/controller/receipts.test.mjs chat/validation/stop.test.mjs",
+    "test:chat": "vitest run --config vitest.chat.config.mjs",
+    "test:chat-controller": "vitest run --config vitest.chat-controller.config.mjs",
+    "test:chat-guard": "vitest run --config vitest.chat-guard.config.mjs",
+    "test:cloud": "npm run test:controller && npm run test:chat && npm run test:chat-controller && npm run test:chat-guard"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.11",
+    "vite": "8.3.5",
+    "vitest": "4.1.12",
+    "wrangler": "4.156.0"
+  },
+  "dependencies": {
+    "jose": "6.2.14"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

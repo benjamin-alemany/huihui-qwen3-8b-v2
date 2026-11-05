@@ -1,0 +1,3 @@
+import {cloudflareTest} from '@cloudflare/vitest-plugin';
+import {defineConfig} from 'vitest/config';
+export default defineConfig({plugins:[cloudflareTest({wrangler:{configPath:'./wrangler.chat-controller.jsonc'},miniflare:{workers:['primary','backup'].map(role=>({name:'unjailed-chat-stop-'+role,modules:true,compatibilityDate:'2026-10-30',script:`import {WorkerEntrypoint} from 'cloudflare:workers';export class GuardAdmin extends WorkerEntrypoint {arm(){return {armed:true};}shorten(){return {};}disarm(){return {};}report(){return {armed:false,deleted:[]};}}export default {fetch(){return new Response('Not found',{status:404});}};`})),bindings:{CF_TAIL_TOKEN:'DUMMY_'+'x'.repeat(43)}}})],test:{include:['chat/controller/test/controller.spec.mjs']}});

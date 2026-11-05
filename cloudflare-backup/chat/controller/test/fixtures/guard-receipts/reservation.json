@@ -1,0 +1,7 @@
+{
+  "kind": "chat",
+  "name": "qwen-chat-session-0123456789abcdef",
+  "image": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:f4fda4da17fe00a8188527d3a774dcc487529b63fe2e10359912d24d4ee83761",
+  "windowStart": "2026-01-01T12:00:00Z",
+  "windowEnd": "2026-01-01T12:05:00Z"
+}
