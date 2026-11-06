@@ -2,6 +2,7 @@
 !Dockerfile
 !inference_only.py
 !model_boot.py
+!network_boundary.py
 !credential_boot.py
 !credential_boundary.py
 !credential_probe.py
