@@ -8,3 +8,5 @@
 !credential_probe.py
 !boundary_tests/
 !boundary_tests/**
+!offline_cache.py
+!model-manifest.json

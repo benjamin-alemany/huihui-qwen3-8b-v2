@@ -22,7 +22,7 @@ BOOT_KEYS = {"VLLM_API_KEY", "CHAT_CLOUD_GUARDS_VERIFIED", "CHAT_RESERVED_AT", "
              "LD_LIBRARY_PATH"}
 MODEL_KEYS = BOOT_KEYS - {"CHAT_CLOUD_GUARDS_VERIFIED", "CHAT_RESERVED_AT", "CHAT_DEADLINE_UTC"}
 MODEL_KEYS |= {"PATH", "LANG", "LC_ALL", "HOME", "HF_HOME", "TMPDIR", "PYTHONPATH", "HF_HUB_DISABLE_TELEMETRY",
-               "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "DO_NOT_TRACK", "VLLM_NO_USAGE_STATS", "VLLM_LOGGING_LEVEL", "TOKENIZERS_PARALLELISM"}
+               "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "VLLM_HOST_IP", "VLLM_LOOPBACK_IP", "VLLM_RPC_BASE_PATH", "DO_NOT_TRACK", "VLLM_NO_USAGE_STATS", "VLLM_LOGGING_LEVEL", "TOKENIZERS_PARALLELISM"}
 FORBIDDEN_PATHS = ("/root", "/run/secrets", "/.runpod", "/etc/runpod", "/opt/qwen/.env",
                    "/home/inference/.runpod", "/home/inference/.aws", "/home/inference/.config/runpod",
                    "/cache/.runpod", "/tmp/.runpod", "/var/run/docker.sock", "/run/containerd/containerd.sock")
@@ -142,7 +142,8 @@ def model_environment(source):
                   LANG="C.UTF-8", LC_ALL="C.UTF-8",
                   TMPDIR="/tmp/qwen-inference", PYTHONPATH="/opt/qwen", HF_HUB_DISABLE_TELEMETRY="1",
                   HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", DO_NOT_TRACK="1", VLLM_NO_USAGE_STATS="1", VLLM_LOGGING_LEVEL="WARNING",
-                  TOKENIZERS_PARALLELISM="false")
+                  TOKENIZERS_PARALLELISM="false", VLLM_HOST_IP="127.0.0.1",
+                  VLLM_LOOPBACK_IP="127.0.0.1", VLLM_RPC_BASE_PATH="/tmp/qwen-inference")
     return result
 
 

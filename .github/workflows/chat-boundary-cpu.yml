@@ -19,6 +19,8 @@ jobs:
       - name: Portable policy and existing boot regression checks
         run: |
           python3 -B chat/test_boot.py
+          python3 -B chat/test_offline_cache.py
+          python3 -B chat/test_network_boundary.py
           python3 -B chat/test_credential_boundary.py
           python3 -B -m unittest discover -s tests -v
       - name: Verify inherited Linux network boundary with dummy loopback data
