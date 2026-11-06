@@ -9,7 +9,9 @@ and cloud-development setup do not authorize GPU resources, deployments, billing
 changes, a ten-hour run, or Qwen agent/terminal tools. The public configs and budget
 values are dummy development examples, not production configuration or ledgers.
 
-For credential-free CPU development with Node 22.12+: `bash .codex/setup.sh`.
+For credential-free CPU development with Node 22.12+: install with
+`bash .codex/setup.sh`, then run `bash .codex/test.sh` behind the required OS
+network isolation. See [testing and recovery](docs/TESTING-AND-RECOVERY.md).
 It installs the pinned npm dependencies and runs the local dummy-response suites.
 No model weights, Docker image builds, cloud keys or GPU are needed.
 

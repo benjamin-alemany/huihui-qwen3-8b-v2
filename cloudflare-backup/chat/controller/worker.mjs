@@ -2,7 +2,8 @@ import {DurableObject,WorkerEntrypoint} from 'cloudflare:workers';
 import {collectGuardReadiness,safeTailFailure,cloudflareTailClient} from './tails.mjs';
 import {SessionEngine} from './engine.mjs';
 import {runpodClient} from './runpod.mjs';
-import {SessionError,terminal} from './session-policy.mjs';
+import {SessionError,terminal,IMAGE} from './session-policy.mjs';
+import {networkReleaseReady} from './network-release.mjs';
 const object=env=>env.SESSION_CONTROLLER.getByName('owner-chat-controller-v1');
 // The server-side launch lock and one-use approval remain OFF in production
 // until the consolidated acceptance is approved. There is no public endpoint.
@@ -11,7 +12,7 @@ export class ChatSessionController extends DurableObject {
     const connected=!!this.env.RUNPOD_API_KEY,provider=connected?runpodClient(this.env.RUNPOD_API_KEY):null;
     const now=()=>Date.now();
     return new SessionEngine(this.ctx.storage,{now,id:()=>crypto.randomUUID(),hex:length=>Array.from(crypto.getRandomValues(new Uint8Array(length/2)),b=>b.toString(16).padStart(2,'0')).join(''),
-      enabled:this.env.START_ENABLED==='true',approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:this.env.RUNPOD_API_KEY,
+      enabled:this.env.START_ENABLED==='true'&&networkReleaseReady(IMAGE),approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:this.env.RUNPOD_API_KEY,
       maxHourly:Number(this.env.MAX_SESSION_HOURLY_USD??'.60'),maxUSD:Number(this.env.MAX_ACCEPTANCE_USD??'.25'),
       provider,guards:[this.env.PRIMARY_GUARD,this.env.BACKUP_GUARD],
       catalog:()=>connected?provider.catalog():Promise.resolve(JSON.parse(this.env.PREPARED_CATALOG)),
@@ -23,10 +24,10 @@ export class ChatSessionController extends DurableObject {
   }
   async status(){
     const readiness=await this.ctx.storage.get('readiness')??{phase:'not-checked'};
-    return {...await this.engine().status(),readiness};
+    return {...await this.engine().status(),readiness,networkBoundaryReady:networkReleaseReady(IMAGE)};
   }
   quote(){return this.engine().quote();}
-  async start(input){try{const r=await this.ctx.storage.get('readiness');if(['pending','checking'].includes(r?.phase))throw new SessionError('READINESS_CHECK_ACTIVE');return await this.engine().start(input);}catch(e){return {error:e instanceof SessionError?e.code:'START_REFUSED',status:e instanceof SessionError?e.status:409};}}
+  async start(input){try{if(this.env.START_ENABLED==='true'&&!networkReleaseReady(IMAGE))throw new SessionError('NETWORK_BOUNDARY_UNVERIFIED');const r=await this.ctx.storage.get('readiness');if(['pending','checking'].includes(r?.phase))throw new SessionError('READINESS_CHECK_ACTIVE');return await this.engine().start(input);}catch(e){return {error:e instanceof SessionError?e.code:'START_REFUSED',status:e instanceof SessionError?e.status:409};}}
   async stop(input){try{return await this.engine().stop(input);}catch{return {error:'STOP_UNCONFIRMED',status:503};}}
   context(){return this.engine().context();}
   async check(){

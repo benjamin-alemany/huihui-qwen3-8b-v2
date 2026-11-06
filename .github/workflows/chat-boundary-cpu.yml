@@ -19,8 +19,12 @@ jobs:
       - name: Portable policy and existing boot regression checks
         run: |
           python3 -B chat/test_boot.py
+          python3 -B chat/test_offline_cache.py
+          python3 -B chat/test_network_boundary.py
           python3 -B chat/test_credential_boundary.py
           python3 -B -m unittest discover -s tests -v
+      - name: Verify inherited Linux network boundary with dummy loopback data
+        run: timeout 35s python3 -I -B chat/network_probe.py
       - name: Build small CPU fixture without model or CUDA
         run: docker build --platform linux/amd64 -t qwen-chat-boundary-cpu:ci -f chat/boundary_tests/Dockerfile chat
       - name: Verify actual Linux protections with dummy data and network disabled

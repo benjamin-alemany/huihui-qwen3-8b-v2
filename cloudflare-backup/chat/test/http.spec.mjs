@@ -29,6 +29,19 @@ it("requires the signed owner JWT and same-origin JSON before contacting inferen
      expect((await exports.default.fetch(request(valid,"https://unjailed.work",path))).status).toBe(404);
    expect((await exports.default.fetch(request(valid,"https://attacker.test","/api/history/save"))).status).toBe(403);
    const anonymousHistory=await exports.default.fetch(new Request("https://unjailed.work/api/history"));expect(anonymousHistory.status).toBe(401);
+   const backup={format:'unjailed.chat-backup',version:1,conversations:[{title:'HTTP restore',messages:[{role:'user',content:'DUMMY restore'}]}]};
+   const restoreRequest=(path,body=backup,origin='https://unjailed.work',jwt=valid)=>new Request('https://unjailed.work'+path,{method:'POST',headers:{'Cf-Access-Jwt-Assertion':jwt,Origin:origin,'Content-Type':'application/json','X-Workstation-Request':'1'},body:JSON.stringify(body)});
+   for(const path of ['/api/history/import','/api/history/import/preview']){
+    expect((await exports.default.fetch(restoreRequest(path,backup,'https://attacker.test'))).status).toBe(403);
+    expect((await exports.default.fetch(restoreRequest(path,backup,'https://unjailed.work','forged'))).status).toBe(401);
+    expect((await exports.default.fetch(restoreRequest(path,{...backup,version:2}))).status).toBe(400);
+   }
+   expect((await exports.default.fetch(new Request('https://unjailed.work/api/history/backup'))).status).toBe(401);
+   expect((await (await exports.default.fetch(restoreRequest('/api/history/import/preview'))).json()).importable).toBe(1);
+   expect((await exports.default.fetch(restoreRequest('/api/history/import'))).status).toBe(201);
+   const exportResponse=await exports.default.fetch(new Request('https://unjailed.work/api/history/backup',{headers:{'Cf-Access-Jwt-Assertion':valid}}));
+   expect(exportResponse.headers.get('Cache-Control')).toBe('no-store');expect(await exportResponse.json()).toEqual(backup);
+   expect(calls).toHaveLength(1);
    const checkRequest=(body={},origin='https://unjailed.work',jwt=valid)=>new Request('https://unjailed.work/api/controller/check',{method:'POST',headers:{'Cf-Access-Jwt-Assertion':jwt,Origin:origin,'Content-Type':'application/json','X-Workstation-Request':'1'},body:JSON.stringify(body)});
    expect((await exports.default.fetch(checkRequest({},'https://attacker.test'))).status).toBe(403);
    expect((await exports.default.fetch(checkRequest({},'https://unjailed.work','forged'))).status).toBe(401);

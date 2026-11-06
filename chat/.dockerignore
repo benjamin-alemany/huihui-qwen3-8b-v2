@@ -2,8 +2,11 @@
 !Dockerfile
 !inference_only.py
 !model_boot.py
+!network_boundary.py
 !credential_boot.py
 !credential_boundary.py
 !credential_probe.py
 !boundary_tests/
 !boundary_tests/**
+!offline_cache.py
+!model-manifest.json

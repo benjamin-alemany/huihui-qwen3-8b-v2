@@ -45,10 +45,11 @@ responses and do not create cloud resources.
 
 ## Setup and verification
 
-Run `bash .codex/setup.sh`. It installs the exact existing dependency versions and
-runs `bash .codex/test.sh`. The suite covers 47 portable Node tests and 16 Workers
-runtime tests, including simulated provider failures and actual local SQLite
-eviction/recovery. No Docker build, model download or GPU test is part of setup.
+See `docs/TESTING-AND-RECOVERY.md` for the hardened workflow. Run
+`bash .codex/setup.sh` to install pinned packages without lifecycle scripts, then
+`bash .codex/test.sh` to run dummy tests behind verified OS external-network denial.
+Setup and test phases are separate. Neither phase deploys, downloads a model or
+starts a GPU. Review dependency/runtime risks before executing untrusted changes.
 
 The production-source suite also replayed private real tail exports. In this
 public copy that one fixture case uses sanitized scheduled-tail data, so it is
@@ -63,11 +64,11 @@ on a branch for review and report only material findings, failures or required
 owner action. Stop after the review deliverable; do not keep changing code to
 stay busy, schedule recurring work, deploy, or request extra credentials.
 
-## Environment publication
+## Development environment choice
 
-Create a private Codex Cloud environment for this repository, install the pinned
-Node/npm dependencies with `.codex/setup.sh`, leave secrets/identities empty and
-keep network access restricted. Publish only after the setup tests succeed.
-Publishing an environment does not start a Runpod session or a recurring Dot task.
-Dot must be explicitly directed to this repository/environment; it does not inherit
-the private local chat, files or browser sign-ins automatically.
+A Codex Cloud environment is optional and has not been created. Dot's built-in
+cloud computer was unavailable for the first trial; it produced draft PR #1 via
+GitHub and the full suite was verified locally. Current implementation continues
+in the owner's development workspace. The published code and test instructions
+can be used in another permitted, isolated environment without cloud credentials.
+Do not provision a replacement machine or create recurring work without approval.

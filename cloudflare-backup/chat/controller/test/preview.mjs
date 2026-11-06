@@ -1,14 +1,15 @@
 // Loopback-only UI fixture. No cloud client, keys or external requests.
 import {createServer} from 'node:http';import {readFile} from 'node:fs/promises';import {randomUUID} from 'node:crypto';
+import {chatFrom,backupFrom,importPlan,BACKUP_LIMITS} from '../../site/recovery.js';
 const site=new URL('../../site/',import.meta.url);let session=null,quote=null,saved=[];
 const status=()=>({launchEnabled:true,agentToolsEnabled:false,terminalEnabled:false,session,budget:{capUSD:.5,spentUpperUSD:.2,reservedUSD:session&&!['stopped','failed','cancelled'].includes(session.phase)?.23:0,remainingUSD:.3},readiness:{phase:'verified'}});
 const server=createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');const path=req.url;let result,code=200;
  try{
-  if(req.method==='GET'&&['/','/app.js','/session.js','/style.css'].includes(path)){
+  if(req.method==='GET'&&['/','/app.js','/session.js','/recovery.js','/style.css'].includes(path)){
    const file=path==='/'?'index.html':path.slice(1);let body=await readFile(new URL(file,site));if(file==='index.html')body=body.toString().replace('<main>','<main><p role="status">LOCAL DUMMY PREVIEW — no GPU or cloud resources.</p>');res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(body);return;
   }
-  let input='';for await(const part of req){input+=part;if(input.length>65536)throw Error('too large');}const body=input?JSON.parse(input):{};
+  let input='';for await(const part of req){input+=part;if(input.length>BACKUP_LIMITS.bytes)throw Error('too large');}const body=input?JSON.parse(input):{};
   if(path==='/api/controller/status')result=status();
   else if(path==='/api/status')result={chatEnabled:session?.phase==='ready',agentToolsEnabled:false,history:'private-cloud-opt-in',deadline:session?.deadline,reason:'Local dummy session; no paid resources.'};
   else if(path==='/api/session/quote'){quote={id:randomUUID(),minutes:18,totalHourlyUSD:.60,gpuHourlyUSD:.59,maximumUSD:.23,live:true,launchEnabled:true,availability:'HIGH',expiresAt:Date.now()+120000,includes:'GPU, temporary disk, startup and shutdown margin',excludes:'Tax/FX and provider outages'};result=quote;}
@@ -19,7 +20,14 @@ const server=createServer(async(req,res)=>{
   else if(path==='/api/chat')result={content:'Dummy reply: this browser test did not run Qwen or start a GPU.',finishReason:'stop'};
   else if(path==='/api/controller/check'){result=status();code=202;}
   else if(path==='/api/history')result={items:saved.map(({id,title})=>({id,title}))};
-  else if(path==='/api/history/save'){const item={id:randomUUID(),...body};saved.push(item);result={id:item.id};code=201;}
+  else if(path==='/api/history/save'){const item={id:randomUUID(),...chatFrom(body)};if(saved.length>=20)throw Error('full');saved.push(item);result={id:item.id};code=201;}
+  else if(path==='/api/history/backup')result=backupFrom({format:'unjailed.chat-backup',version:1,conversations:saved.map(({title,messages})=>({title,messages}))});
+  else if(path==='/api/history/import/preview'||path==='/api/history/import'){
+   const plan=importPlan(saved.map(({title,messages})=>({title,messages})),body);
+   if(path.endsWith('/preview'))result={importable:plan.add.length,duplicates:plan.duplicates,remainingSlots:plan.remainingSlots,canImport:plan.canImport};
+   else if(!plan.canImport){result={error:'Not enough saved-chat slots. No chats were imported.'};code=409;}
+   else{saved.push(...plan.add.map(c=>({id:randomUUID(),...c})));result={imported:plan.add.length,duplicates:plan.duplicates};code=201;}
+  }else if(path==='/api/history/delete'){saved=saved.filter(c=>c.id!==body.id);result={deleted:true};}
   else if(path.startsWith('/api/history/'))result=saved.find(x=>x.id===path.split('/').at(-1))??{};
   else{result={error:'Not found'};code=404;}
  }catch{result={error:'Dummy request failed'};code=400;}

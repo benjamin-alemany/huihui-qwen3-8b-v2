@@ -2,7 +2,7 @@ import {DurableObject} from "cloudflare:workers";
 import {authenticate} from "../workstation/auth.mjs";
 import {mutationAllowed} from "../workstation/policy.mjs";
 import {Rejection,LIMITS,boundedJSON,sessionFrom,infer} from "./policy.mjs";
-import {historyFrom,historyId,HISTORY_LIMITS} from './history.mjs';
+import {historyFrom,historyBackupFrom,historyId,HISTORY_LIMITS,BACKUP_LIMITS,importPlan} from './history.mjs';
 const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer",
   "Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   "Permissions-Policy":"camera=(), microphone=(), geolocation=()"};
@@ -21,6 +21,18 @@ export class ChatQuota extends DurableObject {
     });
   }
   savedDelete(id){historyId(id);this.ctx.storage.sql.exec('DELETE FROM conversations WHERE id=?',id);return {deleted:true};}
+  savedBackup(){return historyBackupFrom({format:'unjailed.chat-backup',version:1,conversations:this.ctx.storage.sql.exec('SELECT title,messages FROM conversations ORDER BY updated_at DESC,id LIMIT 20').toArray().map(r=>({title:r.title,messages:JSON.parse(r.messages)}))});}
+  savedImport(input,preview=false){
+    let backup;try{backup=historyBackupFrom(input);}catch(e){return {error:e.message,status:e.status??400};}const sql=this.ctx.storage.sql;
+    try{return this.ctx.storage.transactionSync(()=>{
+      const existing=sql.exec('SELECT title,messages FROM conversations').toArray().map(r=>({title:r.title,messages:JSON.parse(r.messages)}));
+      const p=importPlan(existing,backup);
+      if(preview)return {importable:p.add.length,duplicates:p.duplicates,remainingSlots:p.remainingSlots,canImport:p.canImport};
+      if(!p.canImport)return {error:'Not enough saved-chat slots. No chats were imported.',status:409};
+      for(const c of p.add)sql.exec('INSERT INTO conversations VALUES (?,?,?,?)',crypto.randomUUID(),c.title,JSON.stringify(c.messages),Date.now());
+      return {imported:p.add.length,duplicates:p.duplicates};
+    });}catch{return {error:'Import could not be confirmed. Refresh saved chats before retrying; identical snapshots are skipped.',status:503};}
+  }
   acquire(binding){
     const s=binding??sessionFrom(this.env),now=Date.now(),sql=this.ctx.storage.sql;
     if(!/^[a-f0-9]{32}$/.test(s.nonce??'')||!Number.isFinite(s.deadline)||s.deadline<=now||s.deadline>now+30*60000)return null;
@@ -76,13 +88,23 @@ export default {
       if(env.HISTORY_ENABLED!=='true')return json({error:'Saved chats are not enabled'},404);
       const saved=env.CHAT_QUOTA.getByName('owner-saved-chats-v1');
       if(request.method==='GET'&&url.pathname==='/api/history')return json({items:await saved.savedList()});
+      if(request.method==='GET'&&url.pathname==='/api/history/backup')return json(await saved.savedBackup());
       const id=url.pathname.slice('/api/history/'.length);
       if(request.method==='GET'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)){
         const item=await saved.savedRead(id);return item?json(item):json({error:'Saved chat not found'},404);
       }
       if(request.method!=='POST'||!mutationAllowed(request,env.CHAT_ORIGIN))return json({error:'Invalid request origin or format'},403);
       try{
-        const body=await boundedJSON(request.body,HISTORY_LIMITS.bytes);
+        const importing=['/api/history/import','/api/history/import/preview'].includes(url.pathname);
+        const body=await boundedJSON(request.body,importing?BACKUP_LIMITS.bytes:HISTORY_LIMITS.bytes);
+        if(importing){
+          // Validate before RPC as well: remote exception types do not preserve instanceof.
+          const backup=historyBackupFrom(body),result=await saved.savedImport(backup,true);
+          if(result.error)return json(result,result.status??503);
+          if(url.pathname.endsWith('/preview'))return json(result);
+          if(!result.canImport)return json({error:'Not enough saved-chat slots. No chats were imported.'},409);
+          const imported=await saved.savedImport(backup);return json(imported,imported.error?(imported.status??503):201);
+        }
         if(url.pathname==='/api/history/save'){
           const item=await saved.savedWrite(historyFrom(body));return item?json(item,201):json({error:'Twenty chats are saved; export or delete one first'},429);
         }
@@ -105,7 +127,7 @@ export default {
         return json({error:e instanceof Rejection?e.message:"Chat unavailable; no actions were executed"},e instanceof Rejection?e.status:502);
       }finally{if(ticket)try{await quota.release(ticket);}catch{/* Lease expires; never send a second model request. */}}
     }
-    if(request.method!=="GET"||!["/","/index.html","/app.js","/session.js","/style.css"].includes(url.pathname))return json({error:"Not found"},404);
+    if(request.method!=="GET"||!["/","/index.html","/app.js","/recovery.js","/session.js","/style.css"].includes(url.pathname))return json({error:"Not found"},404);
     const r=await env.ASSETS.fetch(request),h=new Headers(r.headers);
     for(const [key,value]of Object.entries(headers))h.set(key,value);
     return new Response(r.body,{status:r.status,headers:h});
