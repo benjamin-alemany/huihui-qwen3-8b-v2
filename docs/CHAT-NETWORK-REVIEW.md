@@ -44,8 +44,12 @@ it checks IPv4/IPv6 TCP policy refusal, UDP/raw socket denial, exec inheritance,
 UNIX IPC and an inbound request/reply using only dummy loopback data.
 Unsupported kernels must fail; do not skip the gate or enable privileged mode.
 
-Local Docker is not running, so no Linux kernel probe, image build or GPU test was
-performed. No assumption is made about Runpod's Landlock/libseccomp availability.
+Local Docker is not running. The prepared model-free network probe passed on a
+standard GitHub Ubuntu CPU runner, demonstrating policy denial, exec inheritance
+and inbound replies there. It does not establish Runpod compatibility. No serving
+image or GPU test was performed. The first full CPU run exposed a missing module
+in the credential-test fixture; the fixture now copies that required module.
+No assumption is made about Runpod's Landlock/libseccomp availability.
 Before another paid acceptance can be proposed:
 1. Run the prepared probe in a permitted credential-free Linux environment.
 2. Review available UNIX IPC/services and offline-cache provisioning.
