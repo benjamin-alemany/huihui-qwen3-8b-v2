@@ -7,10 +7,12 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import credential_boundary as boundary
+import network_boundary
 
 
 def main():
     receipt = boundary.verify_child()  # Before torch, model, tokenizer or weights.
+    receipt["network_boundary"] = network_boundary.install()
     import torch
     if os.getuid() != 10001 or os.getgid() != 10001 or not torch.cuda.is_available():
         raise ValueError("Expected unprivileged CUDA inference runtime")

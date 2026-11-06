@@ -27,3 +27,10 @@ it('runs the readiness alarm deterministically with only dummy Cloudflare respon
  try{expect(env.RUNPOD_API_KEY).toBe('');await a.check();await runDurableObjectAlarm(a);const s=await a.status();expect(s.readiness.phase).toBe('failed');expect(s.launchEnabled).toBe(false);expect(calls.length).toBe(2);await runInDurableObject(a,async(_,ctx)=>expect(await ctx.storage.getAlarm()).toBe(null));}
  finally{spy.mockRestore();}
 });
+it('unverified inference-network image cannot launch even if owner launch flags and a key are supplied',async()=>{
+ const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID());
+ await runInDurableObject(a,instance=>{instance.env={...instance.env,START_ENABLED:'true',APPROVED_ACCEPTANCE_ID:'DUMMY-APPROVAL',RUNPOD_API_KEY:'DUMMY_CONTROL_KEY'};});
+ const before=await a.status();expect(before.networkBoundaryReady).toBe(false);expect(before.launchEnabled).toBe(false);
+ expect((await a.start({quoteId:'anything',maximumUSD:.23})).error).toBe('NETWORK_BOUNDARY_UNVERIFIED');
+ expect((await a.status()).budget).toEqual(before.budget);
+});
