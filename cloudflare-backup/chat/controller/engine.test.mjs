@@ -124,3 +124,81 @@ test('known Pod get failure retains the hold and both guards',async()=>{
  assert.equal(status.session.phase,'stopping');assert.equal(status.session.cleanupVerified,false);
  assert.equal(status.budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));
 });
+
+test('a matching duplicate cannot hide a renamed known Pod during cleanup',async()=>{
+ const h=harness(),s=await h.ready(),before=(await h.engine().status()).budget.reservedUSD;
+ await h.engine().update(s.id,current=>{delete current.knownPodIds;}); // Existing persisted sessions predate the observation set.
+ const original=h.pods[0],duplicate={...original,id:'nopqrstuvwxyz'};
+ h.set({pods:[{...original,name:original.name+'-renamed'},duplicate]});
+ await h.engine().stop({sessionId:s.id});await h.engine().tick();
+ const status=await h.engine().status();
+ assert.equal(status.session.cleanupVerified,false);assert.equal(status.budget.reservedUSD,before);
+ assert.ok(h.guardState.every(Boolean));assert.equal(await h.engine().context(),null);
+ assert.ok(h.pods.some(p=>p.id===original.id&&p.status==='RUNNING'));
+ assert.ok(!h.calls.some(c=>c[0]==='cleanup'&&c[1]===original.id));
+ h.set({pods:[]});await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,true);assert.equal(h.creates,1);
+});
+test('all observed duplicates survive partial cleanup and new engine handles',async()=>{
+ const h=harness();await h.ready();const before=(await h.engine().status()).budget.reservedUSD;
+ const original=h.pods[0],duplicate={...original,id:'nopqrstuvwxyz'};
+ h.set({pods:[original,duplicate]});
+ const cleanup=h.provider.cleanup;h.provider.cleanup=async p=>p.id===duplicate.id?false:cleanup(p);
+ await h.engine().tick();assert.deepEqual(h.pods.map(p=>p.id),[duplicate.id]);
+ h.set({pods:h.pods.map(p=>({...p,name:p.name+'-renamed'}))});
+ await h.engine().tick();const status=await h.engine().status();
+ assert.equal(status.session.cleanupVerified,false);assert.equal(status.budget.reservedUSD,before);
+ assert.ok(h.guardState.every(Boolean));assert.equal(h.pods.length,1);
+ assert.deepEqual((await h.engine().read()).session.knownPodIds,[original.id,duplicate.id]);
+ h.set({pods:[]});await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,true);
+ assert.equal((await h.engine().status()).budget.reservedUSD,0);assert.equal(h.creates,1);
+});
+test('partial guard deletion reports cannot settle an unknown create outcome',async()=>{
+ const h=harness();h.set({createError:true});await h.start();await h.engine().tick();await h.engine().tick();
+ const s=(await h.engine().read()).session,before=(await h.engine().status()).budget.reservedUSD;
+ const p={id:'abcdefghijklm',name:s.reservation.name,image:IMAGE,createdAt:new Date(h.now).toISOString(),cloud:'SECURE',gpu:{id:GPU,count:1},disk:60,ports:['8000/http'],mounts:{},cost:.59,status:'EXITED'};
+ let armed=true;h.deps.guards[0].report=async()=>({armed,name:s.reservation.name,deleted:[p]});
+ await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,false);
+ assert.equal((await h.engine().status()).budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));
+ armed=false;await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,true);assert.equal(h.creates,1);
+});
+test('a completed guard report is rechecked before releasing an unknown-create hold',async()=>{
+ const h=harness();h.set({createError:true});await h.start();await h.engine().tick();await h.engine().tick();
+ const s=(await h.engine().read()).session,before=(await h.engine().status()).budget.reservedUSD;
+ const p={id:'abcdefghijklm',name:s.reservation.name,image:IMAGE,createdAt:new Date(h.now).toISOString(),cloud:'SECURE',gpu:{id:GPU,count:1},disk:60,ports:['8000/http'],mounts:{},cost:.59,status:'EXITED'};
+ h.deps.guards[0].report=async()=>({armed:false,name:s.reservation.name,deleted:[p]});
+ h.provider.get=async()=>{throw Error('read unconfirmed');};
+ await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,false);
+ assert.equal((await h.engine().status()).budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));
+});
+test('a new Pod seen only in final inventory is remembered before a later omission',async()=>{
+ const h=harness(),s=await h.ready(),before=(await h.engine().status()).budget.reservedUSD;
+ const duplicate={...h.pods[0],id:'nopqrstuvwxyz'},list=h.provider.list;let injected=false;
+ h.provider.list=async()=>{
+  if(!injected&&h.calls.some(c=>c[0]==='cleanup')){injected=true;h.set({pods:[duplicate]});}
+  return list();
+ };
+ await h.engine().stop({sessionId:s.id});await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,false);
+ h.set({pods:[{...duplicate,name:duplicate.name+'-renamed'}]});await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,false);
+ assert.equal((await h.engine().status()).budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));
+ assert.ok((await h.engine().read()).session.knownPodIds.includes(duplicate.id));
+ h.set({pods:[]});await h.engine().tick();assert.equal((await h.engine().status()).session.cleanupVerified,true);
+});
+test('observations added during absence checks cannot pass the settlement snapshot',async()=>{
+ const h=harness(),s=await h.ready(),before=(await h.engine().status()).budget.reservedUSD;
+ const duplicate={...h.pods[0],id:'nopqrstuvwxyz'};h.set({pods:[]});
+ let learned=false;h.provider.get=async()=>{
+  if(!learned){learned=true;await h.engine().rememberPods((await h.engine().read()).session,[duplicate]);}
+  return null;
+ };
+ await h.engine().stop({sessionId:s.id});await h.engine().tick();
+ assert.equal((await h.engine().status()).session.cleanupVerified,false);
+ assert.equal((await h.engine().status()).budget.reservedUSD,before);assert.ok(h.guardState.every(Boolean));
+ await h.engine().tick();assert.equal((await h.engine().status()).session.cleanupVerified,true);
+});
