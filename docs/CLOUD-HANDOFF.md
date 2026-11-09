@@ -46,7 +46,7 @@ responses and do not create cloud resources.
 ## Setup and verification
 
 Run `bash .codex/setup.sh`. It installs the exact existing dependency versions and
-runs `bash .codex/test.sh`. The suite covers 47 portable Node tests and 16 Workers
+runs `bash .codex/test.sh`. The suite covers portable Node tests and Workers
 runtime tests, including simulated provider failures and actual local SQLite
 eviction/recovery. No Docker build, model download or GPU test is part of setup.
 
