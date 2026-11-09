@@ -1,5 +1,6 @@
 import {SEED,SCALE,MINUTES,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,receiptFresh} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
+const knownPodIds=s=>[...new Set([...(s.knownPodIds??[]),...(s.pod?[s.pod.id]:[])])];
 // All account state is durable. No network I/O runs inside a transaction.
 export class SessionEngine {
   constructor(storage,deps){this.storage=storage;this.d=deps;}
@@ -44,11 +45,41 @@ export class SessionEngine {
     return {CHAT_ENABLED:'true',CHAT_SESSION:JSON.stringify({podId:s.pod.id,createdAt:new Date(s.bootAt).toISOString(),nonce:s.nonce,minutes:MINUTES}),INFERENCE_API_KEY:s.inferenceKey};
   }
   async update(id,fn){return this.tx(r=>{if(r.session?.id!==id)throw new SessionError('SESSION_CHANGED');return fn(r.session,r);});}
+  async rememberPods(s,pods){
+    // Keep every observation before any cleanup I/O, not just the chat Pod.
+    // The legacy pod field remains evidence for already-persisted sessions.
+    s.knownPodIds=await this.update(s.id,current=>{
+      current.knownPodIds=[...new Set([...knownPodIds(current),...pods.map(p=>p.id)])];
+      return structuredClone(current.knownPodIds);
+    });
+  }
+  async inventory(s){
+    const pods=(await this.d.provider.list()).filter(p=>podMatches(p,s.reservation));
+    for(const p of pods)validatePod(p,s.reservation,Infinity);
+    if(pods.length)await this.rememberPods(s,pods);
+    return pods;
+  }
   async finish(s,phase,code=null){
+    let checkedIds;
+    const checked=current=>{
+      if(current.createAttempted&&(!checkedIds||knownPodIds(current).some(id=>!checkedIds.has(id))))throw new SessionError('POD_OBSERVATIONS_CHANGED',503);
+      if(s.lease&&current.lease!==s.lease)throw new SessionError('SESSION_LEASE_CHANGED',503);
+    };
+    if(s.createAttempted){
+      const current=(await this.read()).session;
+      if(current?.id!==s.id)throw new SessionError('SESSION_CHANGED');
+      // A partial duplicate cleanup, changed identity, or incomplete inventory
+      // cannot erase a previously observed Pod or release its budget hold.
+      checkedIds=new Set(knownPodIds(current));
+      for(const id of checkedIds)if(await this.d.provider.get(id)!==null)throw new SessionError('POD_ABSENCE_UNCONFIRMED',503);
+      if((await this.inventory(s)).length)throw new SessionError('POD_ABSENCE_UNCONFIRMED',503);
+    }
+    await this.update(s.id,checked);
     // Never drop a guard credential until cleanup/no-create is confirmed.
     const disarmed=await Promise.allSettled(this.d.guards.map(g=>g.disarm(s.reservation?.name??null)));
     if(disarmed.some(x=>x.status==='rejected'))throw new SessionError('GUARD_DISARM_PENDING');
     await this.update(s.id,(current,r)=>{
+      checked(current);
       let debit=0;
       if(current.createAttempted){
         // Conservative elapsed wall-clock upper estimate, including two extra
@@ -93,22 +124,17 @@ export class SessionEngine {
           try{await this.d.provider.create(body);}catch{/* Reconcile below/on alarm. */}
         }
       }else if(['reconciling','starting','ready','stopping','attention'].includes(s.phase)){
-        const pods=(await this.d.provider.list()).filter(p=>podMatches(p,s.reservation));
-        for(const p of pods)validatePod(p,s.reservation,Infinity);
+        const pods=await this.inventory(s);
         if(s.createAttempted&&!pods.length){
-          if(s.pod){
-            // Inventory filtering is not proof that the known Pod was deleted.
-            // A changed identity or incomplete list must retain its budget hold.
-            const known=await this.d.provider.get(s.pod.id);
-            if(known){
-              validatePod(known,s.reservation,Infinity);
-              throw new SessionError('POD_ABSENCE_UNCONFIRMED',503);
-            }
+          if(knownPodIds(s).length){
             await this.finish(s,'stopped');return;
           }
           const reports=await Promise.all(this.d.guards.map(g=>g.report()));
-          if(reports.some(r=>r.name===s.reservation.name&&r.deleted?.length)){
-            for(const report of reports)for(const p of report.deleted??[])validatePod(p,s.reservation,s.quote.gpuHourlyUSD);
+          const completed=reports.filter(r=>r.armed===false&&r.name===s.reservation.name&&r.deleted?.length);
+          if(completed.length){
+            const deleted=completed.flatMap(r=>r.deleted);
+            for(const p of deleted)validatePod(p,s.reservation,s.quote.gpuHourlyUSD);
+            await this.rememberPods(s,deleted);
             await this.finish(s,'stopped');return;
           }
           if(this.d.now()>Date.parse(s.reservation.windowEnd))await this.update(s.id,c=>{c.phase='attention';c.code='CREATE_OUTCOME_UNKNOWN';c.stopRequested=true;});
@@ -118,8 +144,8 @@ export class SessionEngine {
           await this.update(s.id,c=>{c.phase='stopping';c.stopRequested=true;c.stopAt??=this.d.now();c.pod??=pods[0];});
           await Promise.allSettled(this.d.guards.map(g=>g.shorten(s.reservation.name,this.d.now())));
           let complete=true;for(const p of pods)if(!await this.d.provider.cleanup(p,s.reservation,Infinity))complete=false;
-          // A fresh complete inventory is required even after successful deletes.
-          if(complete&&!(await this.d.provider.list()).some(p=>podMatches(p,s.reservation)))await this.finish({...s,pod:pods[0]},'stopped');
+          // finish rechecks every known ID and records any newly listed Pods.
+          if(complete)await this.finish({...s,pod:pods[0]},'stopped');
         }else{
           const p=await this.d.provider.get(pods[0].id);if(!p)return;validatePod(p,s.reservation,s.quote.gpuHourlyUSD);
           const healthy=p.status==='RUNNING'&&await this.d.provider.health(p,s.inferenceKey);
