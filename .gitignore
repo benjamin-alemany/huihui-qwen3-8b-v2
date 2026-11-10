@@ -14,3 +14,4 @@ node_modules/
 *.local.json*
 .DS_Store
 chat/model-cache/
+chat/loopback_ifaddrs.so

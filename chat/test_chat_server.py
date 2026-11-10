@@ -23,17 +23,23 @@ class HTTPTests(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.result = ('DUMMY response', 'stop')
+        self.entered, self.release = threading.Event(), threading.Event()
+        self.block = False
         def generate(messages):
             self.calls.append(messages)
+            if self.block:
+                self.entered.set()
+                if not self.release.wait(2):raise RuntimeError('Dummy timeout')
             if isinstance(self.result, Exception):
                 raise self.result
             return self.result
-        self.http = HTTPServer(('127.0.0.1', 0), server.make_handler(generate, KEY))
+        self.http = server.BoundedServer(('127.0.0.1', 0), server.make_handler(generate, KEY))
         self.thread = threading.Thread(target=self.http.serve_forever, kwargs={'poll_interval': .01})
         self.thread.start()
         self.port = self.http.server_port
 
     def tearDown(self):
+        self.release.set()
         self.http.shutdown()
         self.thread.join(2)
         self.http.server_close()
@@ -91,6 +97,20 @@ class HTTPTests(unittest.TestCase):
     def test_oversized_body_refused(self):
         self.assertEqual(self.request(b'x'*(server.MAX_BODY+1))[0], 400)
         self.assertEqual(self.calls, [])
+
+    def test_health_remains_available_during_one_generation_and_second_is_refused(self):
+        self.block = True
+        result = []
+        worker = threading.Thread(target=lambda: result.append(self.request()[0]))
+        worker.start()
+        try:
+            self.assertTrue(self.entered.wait(1))
+            self.assertEqual(self.request(method='GET', path='/health')[0], 200)
+            self.assertEqual(self.request()[0], 429)
+            self.assertEqual(len(self.calls), 1)
+        finally:
+            self.release.set();worker.join(2)
+        self.assertEqual(result, [200])
 
     def test_ambiguous_http_framing_refused(self):
         for extra in ('Content-Length: 2\r\nContent-Length: 2',

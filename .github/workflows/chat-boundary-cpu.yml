@@ -78,13 +78,20 @@ jobs:
         run: |
           set -euo pipefail
           image='ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c'
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            -o chat/loopback_ifaddrs.so chat/loopback_ifaddrs.c
           docker pull "$image"
+          docker image inspect --format 'Existing base uncompressed bytes: {{.Size}}' "$image"
+          docker run --rm --network none --user 10001:10001 --entrypoint python3 "$image" -I -c '
+          import importlib.metadata as m,json
+          names=["vllm","torch","transformers","safetensors","tokenizers","huggingface-hub","Jinja2","pyzmq","numpy","fastapi","starlette","uvicorn","pydantic","requests","urllib3","aiohttp"]
+          print("SCOPED_DEPENDENCIES "+json.dumps({n:m.version(n) for n in names},sort_keys=True))
+          '
           docker run --rm --network none --cpus 2 --memory 6g --pids-limit 128 \
             --cap-drop ALL --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
             --mount "type=bind,source=$GITHUB_WORKSPACE/chat,target=/candidate,readonly" \
             --entrypoint /bin/bash "$image" -ceu '
               cp -R /candidate/. /opt/qwen/
-              cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack -o /opt/qwen/loopback_ifaddrs.so /opt/qwen/loopback_ifaddrs.c
               chmod 0444 /opt/qwen/loopback_ifaddrs.so
               exec python3 -I -B /opt/qwen/boundary_tests/runtime_probe_boot.py
             '

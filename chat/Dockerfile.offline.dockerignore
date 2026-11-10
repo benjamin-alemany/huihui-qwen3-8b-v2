@@ -9,6 +9,8 @@
 !offline_cache.py
 !model-manifest.json
 !chat_server.py
-!loopback_ifaddrs.c
+!loopback_ifaddrs.so
+!model-notices/
+!model-notices/*
 !model-cache/
 !model-cache/**

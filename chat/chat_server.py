@@ -7,10 +7,41 @@ import hmac
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
+from socketserver import ThreadingMixIn
+import threading
 
 MODEL = 'huihui-qwen3-8b-v2'
 MAX_BODY = 16384
 FIELDS = {'model', 'messages', 'stream', 'max_tokens', 'temperature', 'chat_template_kwargs'}
+
+
+class BoundedServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 8
+
+    def __init__(self, *args, **kwargs):
+        self.slots = threading.BoundedSemaphore(4)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, address)
+        except BaseException:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            self.slots.release()
+
+    def handle_error(self, request, address):
+        pass  # No traceback, request or prompt data in public logs.
 
 
 def conversation(body):
@@ -65,6 +96,7 @@ def engine_options(model_path):
 def make_handler(generate, key):
     if not isinstance(key, str) or len(key) < 32:
         raise ValueError('Inference authentication required')
+    generation_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.0'  # One bounded request per connection.
@@ -123,8 +155,10 @@ def make_handler(generate, key):
                 if len(data) != int(lengths[0]):
                     raise ValueError('Incomplete body')
                 messages = conversation(strict_json(data))
-            except (ValueError, UnicodeError, OSError):
+            except (ValueError, UnicodeError, OSError, RecursionError):
                 return self.reply(400, {'error': 'Invalid text request'})
+            if not generation_lock.acquire(blocking=False):
+                return self.reply(429, {'error': 'Inference busy'})
             try:
                 content, reason = generate(messages)
                 if not isinstance(content, str) or len(content.encode('utf-8')) > 12000 or reason not in ('stop', 'length'):
@@ -134,6 +168,8 @@ def make_handler(generate, key):
             except Exception:
                 # Never serialize upstream exception text, prompts, paths or keys.
                 return self.reply(503, {'error': 'Inference unavailable'})
+            finally:
+                generation_lock.release()
 
     return Handler
 
@@ -159,8 +195,9 @@ def serve(model_path):
         item = outputs[0].outputs[0]
         return item.text, item.finish_reason
 
-    # Synchronous by design: one inference at a time, no worker process/IPC server.
+    # One synchronous inference at a time. Bounded HTTP threads keep health checks
+    # responsive during generation, without any worker process/named IPC server.
     # A separate supervisor and cloud guards retain the fixed session deadline.
-    with HTTPServer(('0.0.0.0', 8000), make_handler(generate, os.environ['VLLM_API_KEY'])) as server:
+    with BoundedServer(('0.0.0.0', 8000), make_handler(generate, os.environ['VLLM_API_KEY'])) as server:
         print('CHAT_READY inbound-only chat; agent tools disabled', flush=True)
         server.serve_forever()

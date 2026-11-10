@@ -1,0 +1,94 @@
+name: Approved offline chat image publication
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: Requires separate owner permission to download and publicly redistribute 16.4 GB of pinned model files
+        type: choice
+        options: [not-approved, approve-public-offline-image]
+        default: not-approved
+      cpu_run_id:
+        description: Successful chat-boundary-cpu run covering the unchanged inference source
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  packages: write
+concurrency:
+  group: qwen-offline-image-publication
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.visibility == 'public' && inputs.approval == 'approve-public-offline-image'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require reviewed source and a successful complete CPU verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CPU_RUN_ID: ${{ inputs.cpu_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CPU_RUN_ID" =~ ^[0-9]{1,20}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID" > "$RUNNER_TEMP/cpu-proof.json"
+          python3 - <<'PY'
+          import json,os,subprocess
+          proof=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-proof.json'))
+          assert proof['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert proof['path']=='.github/workflows/chat-boundary-cpu.yml'
+          assert proof['status']=='completed' and proof['conclusion']=='success'
+          sha=proof['head_sha'];assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          subprocess.run(['git','merge-base','--is-ancestor',sha,'HEAD'],check=True)
+          subprocess.run(['git','diff','--exit-code',sha,'HEAD','--','chat','.codex','.github/workflows/chat-boundary-cpu.yml'],check=True)
+          PY
+      - name: Require standard free-runner disk only
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          python3 - <<'PY'
+          import json,shutil
+          manifest=json.load(open('chat/model-manifest.json'))
+          total=sum(f['size'] for f in manifest['files'].values())
+          assert shutil.disk_usage('.').free > 3*total+6*1024**3, 'Insufficient free ephemeral disk; stop without a paid runner or storage'
+          PY
+      - name: Compile fixed compatibility library without install hooks
+        run: |
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack -o chat/loopback_ifaddrs.so chat/loopback_ifaddrs.c
+          sha256sum chat/loopback_ifaddrs.so chat/model-manifest.json
+      - name: Materialize pinned public files without inherited credentials
+        run: |
+          mkdir "$RUNNER_TEMP/offline-download-home"
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/offline-download-home" \
+            python3 -I -B chat/cache_materialize.py --approved-revision 7d89db76029281fd8f3e6698a8e30738608105a9
+      - name: Create temporary layer-reusing builder
+        run: |
+          printf '[worker.oci]\n  max-parallelism = 1\n' > "$RUNNER_TEMP/buildkitd.toml"
+          docker buildx create --name qwen-offline-builder --driver docker-container --buildkitd-config "$RUNNER_TEMP/buildkitd.toml" --use
+      - name: Authenticate only the existing registry publication
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish reviewed offline candidate without starting it
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2"
+          docker buildx build --platform linux/amd64 --provenance=false --push \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --metadata-file "$RUNNER_TEMP/offline-image.json" \
+            --tag "$image:offline-chat-$GITHUB_SHA" -f chat/Dockerfile.offline chat
+          python3 - <<'PY'
+          import json,os
+          d=json.load(open(os.environ['RUNNER_TEMP']+'/offline-image.json'))
+          print('OFFLINE_CHAT_DIGEST='+d['containerimage.digest'])
+          print('Candidate only; no Pod, deployment, release-pin change or agent tools.')
+          PY
+      - name: Remove temporary login and builder
+        if: always()
+        run: |
+          docker logout ghcr.io
+          docker buildx rm qwen-offline-builder || true

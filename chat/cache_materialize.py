@@ -9,9 +9,11 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import sys
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import credential_boundary
 import offline_cache
 
