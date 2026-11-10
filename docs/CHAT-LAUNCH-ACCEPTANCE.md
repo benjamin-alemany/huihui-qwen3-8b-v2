@@ -1,5 +1,10 @@
 # Chat launch acceptance — prepared, not authorized
 
+Update: the owner approved and completed only the free cloud download, build and
+publication. OFFLINE-IMAGE.json records the corrected image and successful exact
+artifact readback (run 42741842571). The paid phases below remain unapproved;
+publication does not change the null network release pin or cumulative budgets.
+
 No workflow dispatch, Pod, publication, deployment or budget change follows from
 this document. Agent, terminal and browsing tools remain off; no ten-hour run.
 

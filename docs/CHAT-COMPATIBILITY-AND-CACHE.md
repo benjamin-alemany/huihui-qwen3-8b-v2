@@ -33,7 +33,14 @@ read-only files and rechecked at startup. Individual shard layers stay below
 GHCR's 10 GB per-layer limit. GitHub's standard public runner and existing public
 GHCR package are the intended free build/storage path; no paid runner, volume,
 artifact/cache storage or laptop model download is part of the prepared workflow.
-The workflow has NOT been dispatched and no weights or serving image were published.
+After explicit owner approval, the free workflow downloaded/published the cache.
+The first image failed its permission check; its /opt/qwen-model directory had
+mode 0444 in the actual OCI metadata. The corrected digest in OFFLINE-IMAGE.json
+adds only root-owned 0555 directory metadata. A native dummy regression proves
+the original refusal and corrected hash/read-only behavior. All original code
+and model layers are identical. Run 42741842571 verifies the complete corrected
+image as UID 10001, including all 14 file hashes and pinned runtime imports.
+No GPU, model inference, production deployment or agent tool was started.
 
 The bounded HTTP adapter has four connection slots, one generation at a time,
 authenticated health/models routes that remain responsive during generation,

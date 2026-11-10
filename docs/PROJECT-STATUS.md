@@ -7,6 +7,14 @@ persistent projects with independent backups.
 
 ## Evidence and integration
 
+Owner-approved free cloud download/publication is complete. The exact offline
+image in OFFLINE-IMAGE.json passed full cache hashes, ownership, read-only UID
+10001 access, entrypoint, kernel policy installation and runtime-import checks.
+Run 42741842571 passed both jobs. The first candidate refused startup because a
+cache directory lacked search permission; a regression-tested directory-only
+layer corrected it without changing any application/model layer. All weights
+remained on GitHub/GHCR, not the laptop. Runpod/GPU validation is still pending.
+
 Main remains at 442408e. PR #2 contains the prepared hardening/recovery release;
 it is not merged or deployed. Dot's initial cleanup patch was already included.
 The additional PR #1 commit 6e7b659 is now integrated on the PR #2 branch, retaining
@@ -42,8 +50,8 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
 | Internet egress | Candidate inherited Landlock/seccomp denial and Linux dummy tests | Exact serving-image/Runpod compatibility |
 | UNIX socket isolation | Named/abstract sockets, all connect calls and datagram pairs denied; Linux CPU checks passed | Exact final image and Runpod kernel validation |
 | vLLM compatibility | Synchronous adapter prepared; actual serving libraries and single-rank Gloo checked on free CPU | CUDA/NCCL and full-model startup under the unchanged restrictions |
-| Offline cache | Manifest/verifier/downloader, immutable image recipe and approval-gated free cloud build prepared/tested | Explicit approval for ~16.4 GB download and public candidate publication |
-| Dependency/artifact review | Exact base inventory, 16-package advisory review and prepared final readback workflow | Review actual published candidate; no claim of complete OS/CUDA/transitive audit |
+| Offline cache | 14 pinned files downloaded on GitHub, published and rehashed in the exact image as UID 10001; directory-only correction verified | Intended Runpod/GPU runtime gate |
+| Dependency/artifact review | Exact image/configuration/cache readback and 16-package advisory review recorded | No claim of complete OS/CUDA/transitive audit; hardware/model validation pending |
 | Execution sandbox | Previous Runpod namespace incompatibility recorded; separate CPU architecture proposed | Provider selection, complete fresh costs and verified target isolation |
 | OpenCode harness | Repository/incident research and bounded benchmark fixture prepared | Pinned review and exact-model read/edit/test/correct benchmark in verified sandbox |
 | Browser editor and projects | Architecture/repository research | Implement editor, project lifecycle and persistent session layout |
@@ -55,9 +63,9 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
 1. Review the new socket/descriptor restrictions and successful model-free CPU
    probes. Missing protection must refuse startup; do not add privileges or
    network exceptions to force compatibility.
-2. Review the exact artifact/cache plan and quote download/build/storage/idle and
-   bounded runtime costs. Obtain the owner's required approvals before weights,
-   serving-image publication or paid resources.
+2. Review the published artifact in OFFLINE-IMAGE.json and refresh bounded runtime
+   costs before asking for paid approval. Free build/publication permission does
+   not authorize a Pod or increase any cumulative budget.
 3. Validate the candidate image/runtime; preserve the null network release pin
    until the precise image and boundary pass. Earlier GPU tests are not a pass
    for changed inference security code.
@@ -68,9 +76,10 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
    terminal and browsing tools remain disabled throughout phase one.
 
 CHAT-LAUNCH-ACCEPTANCE.md contains the consolidated two-phase proposal and public
-cost sources. The prepared offline publication workflow is manual and defaults
-to not-approved. No model download, image publication or paid phase is implied.
+cost sources. The paid phases remain unapproved. Future full model publication
+still requires owner approval and a matching successful source verification.
 
-No paid resource, model-weight download, serving-image publication, production
-deployment, budget change, automatic retry or ten-hour session occurred in this
-review. Historical estimates are not current quotes or spending authorization.
+Only the explicitly approved free cloud download/build/publication occurred.
+No paid resource, production deployment, budget change, automatic GPU retry or
+ten-hour session occurred. Agent tools remain off. Historical estimates are not
+current quotes or spending authorization.
