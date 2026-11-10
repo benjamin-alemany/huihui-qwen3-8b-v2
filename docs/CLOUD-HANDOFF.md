@@ -11,8 +11,11 @@ recorded Runpod/GPU tests. The controller/interface is deployed with paid Start
 and guard arming disabled. Its new end-to-end paid acceptance is still pending.
 This publication/environment setup does not approve that acceptance.
 
-The published image digest remains pinned in the controller source. Source and
-tests were copied for development; no new inference image is needed for this handoff.
+The historical inference image passed earlier functional tests, but does not
+establish readiness for the new network/cache boundary. The release approval pin
+remains null. A candidate serving image and exact runtime validation will be
+needed after the remaining isolation gates and separate owner approval; neither
+publication nor a paid run is authorized by this handoff. See PROJECT-STATUS.md.
 
 ## Repository map
 
