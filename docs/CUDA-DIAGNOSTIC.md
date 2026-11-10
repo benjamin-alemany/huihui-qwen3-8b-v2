@@ -53,7 +53,9 @@ loopback shim into the same fixed trusted preload pathname. The environment
 allowlist and production serving image remain unchanged. The observer forwards
 the same syscalls; the existing kernel policy still decides whether they succeed.
 The new image and shared-library bytes would require an exact artifact review
-before any separately approved GPU test. No diagnostic image has been published.
+before any separately approved GPU test. The diagnostic image has now been published and its exact bytes reviewed on a
+separate free CPU runner; see `CUDA-DIAGNOSTIC-IMAGE.json`. This does not approve
+a GPU run or validate CUDA on Runpod.
 
 ```sh
 # Linux x86_64 preparation, not a GPU launch or registry publication:
@@ -99,3 +101,19 @@ allowlist excludes cached weights, dummy-driver libraries and unrelated files.
 If CUDA truly requires an operation that cannot be allowed safely, move egress/IPC
 enforcement to a separately verified host/VM boundary. Do not initialize CUDA
 unrestricted then pass open sockets to the model or silently enable agent tools.
+
+## Exact-image review
+
+The built diagnostic is 9.21 GB compressed and 23.40 GB uncompressed. Its exact
+published source/observer hashes, amd64 entrypoint, protected ownership and absent
+model cache passed readback. The protected CPU boot discarded a dummy control
+key, reached UID 10001 with zero child capabilities, installed the unchanged
+network policy and refused GPU serving without a GPU. The first fixture omitted
+CHOWN/FOWNER needed by the trusted root directory setup; the corrected fixture
+allows those ordinary bootstrap capabilities only before the existing child
+privilege drop. No image bytes or child/network protections were changed to
+make that fixture pass. Rechecking the same digest avoided another publication.
+
+[Exact-artifact review 42850263624](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42850263624) passed.
+The serving release pin stays null, agent tools stay disabled, and intended
+Runpod/CUDA validation remains unverified.
