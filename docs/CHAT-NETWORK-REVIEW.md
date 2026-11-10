@@ -1,5 +1,12 @@
 # Chat-only security review — 2026-11-06
 
+November 9: see CHAT-COMPATIBILITY-AND-CACHE.md for the superseding candidate and
+CPU evidence. Named UNIX sockets are now denied at creation, all connect calls
+are denied, and only anonymous STREAM pairs remain. The synchronous chat adapter
+and fixed loopback metadata library avoid named ZMQ IPC and route discovery.
+The exact final offline image/Runpod/GPU release gate is still unpassed; the
+historical notes below are not a description of the new socket policy.
+
 ## Release decision: blocked, no paid runtime
 
 PR #2 retains the reviewed cleanup fixes, owner JWT/CSRF, plain-text output,

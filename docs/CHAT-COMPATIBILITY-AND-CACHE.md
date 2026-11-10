@@ -1,5 +1,57 @@
 # Chat compatibility and offline cache — 2026-11-06
 
+## November 9 update — stricter single-process candidate
+
+The earlier IPC design below is superseded. The candidate now runs the pinned
+vLLM synchronous LLM/InprocClient with UniProcExecutor behind a bounded chat-only
+HTTP adapter. It denies all connect() calls, all named/abstract UNIX socket
+creation, non-STREAM socketpairs, alternate families, Internet datagrams/raw
+sockets, descriptor theft syscalls and io_uring. Only anonymous connected UNIX
+STREAM pairs and inbound TCP replies remain. No namespace or ABI-9 dependency,
+socket allowlist, privileged mode or loopback TCP exception was introduced.
+
+Actual CPU probing found Gloo's getifaddrs() uses a denied NETLINK_ROUTE socket.
+The fixed loopback_ifaddrs.c compatibility library supplies only static IPv4
+loopback metadata without opening sockets; it is not a security boundary. It has
+no constructors, model inputs, environment lookups or file/network operations.
+The root-owned library path and GLOO interface are fixed by the trusted launcher;
+inherited preload settings are discarded. Kernel denials remain authoritative.
+Standard descriptors carrying sockets refuse startup before model imports.
+
+Free CPU verification passed: native socket denials and exec inheritance,
+17 Linux credential cases, pinned Torch 2.13 CPU FileStore/Gloo single-rank groups
+and collectives, and the existing serving image's Torch/Gloo/vLLM option/import
+path under the same denials. Final Actions run 42736136833 also checked the
+host-built library against that image. No model/CUDA initialization
+occurred. This closes the demonstrated CPU transport failure; it does not prove
+Runpod kernel, CUDA, NCCL or full Qwen startup compatibility.
+
+The source release pin remains null. cache_materialize.py and Dockerfile.offline
+prepare the exact cache and layer layout only after separate approval. Files are
+downloaded with no credentials/proxies/retries, size/hash checked, copied as root
+read-only files and rechecked at startup. Individual shard layers stay below
+GHCR's 10 GB per-layer limit. GitHub's standard public runner and existing public
+GHCR package are the intended free build/storage path; no paid runner, volume,
+artifact/cache storage or laptop model download is part of the prepared workflow.
+The workflow has NOT been dispatched and no weights or serving image were published.
+
+The bounded HTTP adapter has four connection slots, one generation at a time,
+authenticated health/models routes that remain responsive during generation,
+strict request framing/JSON/text limits, fixed model/settings and redacted errors.
+It exposes no admin, tool, file, media, upload, streaming or template API.
+
+The existing base is 23,403,875,856 uncompressed bytes. Adding the pinned cache
+puts expected base-plus-cache near 39.8 GB before small application/runtime data;
+retain the proposed 60 GB temporary Pod disk and verify final image size before
+paid use. The final image still needs its own readback/cache/ownership checks.
+CHAT-SCOPED-ADVISORIES.json records no OSV matches for the 16 explicit serving
+packages read from the image. This is not a transitive/OS/CUDA audit, dependency
+trust guarantee or model behavioral clearance. Review final artifact findings
+before paid validation; never enable tools based on these checks.
+
+The following sections record the earlier source-only investigation and explain
+why the default asynchronous server was not retained.
+
 ## Source findings, not a GPU compatibility pass
 
 Reviewed the pinned vLLM v0.32.0 source. Local-only engine input/output and

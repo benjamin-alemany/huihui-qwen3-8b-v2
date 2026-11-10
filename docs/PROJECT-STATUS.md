@@ -13,10 +13,14 @@ The additional PR #1 commit 6e7b659 is now integrated on the PR #2 branch, retai
 our hardened test wrapper, draft/restore features and network release lock.
 
 After integration: 67 portable Node + 31 Workers runtime tests passed (98
-application tests), plus 16 portable Python tests. The application suite ran
+application tests), plus 31 portable Python tests after the chat/cache changes. The suite ran
 behind verified OS external-network denial with dummy provider responses.
 Earlier Linux CPU CI passed on fb7bf04. These tests do not establish compatibility
 of the candidate image with the Runpod kernel, CUDA, vLLM or model weights.
+Final free CPU run 42736136833 passed native restrictions, 17 credential cases,
+single-rank Gloo collectives and the actual serving libraries with the new shim.
+The 16-package OSV review returned no matching advisories; its scope excludes
+transitive/OS/CUDA packages and model behavior. See CHAT-SCOPED-ADVISORIES.json.
 
 Read-only Cloudflare checks confirm that controller, gateway and both independent
 stop Workers still serve their November 3 deployments. No deployment was made.
@@ -36,10 +40,10 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
 | Chat backup/restore | Bounded versioned JSON export/import, duplicate safety and atomic rollback prepared/tested | Deploy; independent automatic destination not implemented |
 | Inference credentials | Historical functional credential-boundary tests; no billing key intended in serving process | Exact candidate boundary readback and validation |
 | Internet egress | Candidate inherited Landlock/seccomp denial and Linux dummy tests | Exact serving-image/Runpod compatibility |
-| UNIX socket isolation | Risk documented; private runtime directory configured | Enforced denial of unrelated pathname/abstract proxies and inherited capabilities |
-| vLLM compatibility | Pinned source paths reviewed; offline/local settings prepared | Demonstrate full pinned stack works without weakening restrictions |
-| Offline cache | Pinned 14-file manifest and adversarial verifier tests | Approved materialization of ~16.4 GB, immutable cache and candidate image |
-| Dependency/artifact review | Scoped research and pinned recipes exist | Review final assembled serving artifact and remaining transport dependencies |
+| UNIX socket isolation | Named/abstract sockets, all connect calls and datagram pairs denied; Linux CPU checks passed | Exact final image and Runpod kernel validation |
+| vLLM compatibility | Synchronous adapter prepared; actual serving libraries and single-rank Gloo checked on free CPU | CUDA/NCCL and full-model startup under the unchanged restrictions |
+| Offline cache | Manifest/verifier/downloader, immutable image recipe and approval-gated free cloud build prepared/tested | Explicit approval for ~16.4 GB download and public candidate publication |
+| Dependency/artifact review | Exact base inventory, 16-package advisory review and prepared final readback workflow | Review actual published candidate; no claim of complete OS/CUDA/transitive audit |
 | Execution sandbox | Previous Runpod namespace incompatibility recorded; separate CPU architecture proposed | Provider selection, complete fresh costs and verified target isolation |
 | OpenCode harness | Repository/incident research and bounded benchmark fixture prepared | Pinned review and exact-model read/edit/test/correct benchmark in verified sandbox |
 | Browser editor and projects | Architecture/repository research | Implement editor, project lifecycle and persistent session layout |
@@ -48,9 +52,9 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
 
 ## Launch sequence
 
-1. Resolve UNIX socket/inherited-descriptor access and vLLM transport requirements
-   using source review and model-free CPU probes. Missing protection must refuse
-   startup; do not add privileges or network exceptions to force compatibility.
+1. Review the new socket/descriptor restrictions and successful model-free CPU
+   probes. Missing protection must refuse startup; do not add privileges or
+   network exceptions to force compatibility.
 2. Review the exact artifact/cache plan and quote download/build/storage/idle and
    bounded runtime costs. Obtain the owner's required approvals before weights,
    serving-image publication or paid resources.
@@ -62,6 +66,10 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
    including owner login, Start, response, Stop/expiry and restored history.
 5. Address the separate agent workstation phase after chat acceptance. Agent,
    terminal and browsing tools remain disabled throughout phase one.
+
+CHAT-LAUNCH-ACCEPTANCE.md contains the consolidated two-phase proposal and public
+cost sources. The prepared offline publication workflow is manual and defaults
+to not-approved. No model download, image publication or paid phase is implied.
 
 No paid resource, model-weight download, serving-image publication, production
 deployment, budget change, automatic retry or ten-hour session occurred in this
