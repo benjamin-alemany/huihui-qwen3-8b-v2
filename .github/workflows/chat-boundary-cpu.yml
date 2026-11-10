@@ -60,3 +60,31 @@ jobs:
           env -i PATH="$RUNNER_TEMP/qwen-transport-venv/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP/qwen-transport-home" \
             LD_PRELOAD="$RUNNER_TEMP/loopback_ifaddrs.so" GLOO_SOCKET_IFNAME=lo \
             timeout 50s "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -B chat/boundary_tests/transport_probe.py
+  serving-libraries:
+    # Existing public image only; never build/publish serving images or load weights.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Require enough free ephemeral disk on a standard runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          python3 -c 'import shutil; assert shutil.disk_usage("/").free > 45*1024**3, "Stop: standard runner has insufficient free disk"'
+      - name: Check existing serving libraries with no network GPU credentials or model
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c'
+          docker pull "$image"
+          docker run --rm --network none --cpus 2 --memory 6g --pids-limit 128 \
+            --cap-drop ALL --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/chat,target=/candidate,readonly" \
+            --entrypoint /bin/bash "$image" -ceu '
+              cp -R /candidate/. /opt/qwen/
+              cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack -o /opt/qwen/loopback_ifaddrs.so /opt/qwen/loopback_ifaddrs.c
+              chmod 0444 /opt/qwen/loopback_ifaddrs.so
+              exec python3 -I -B /opt/qwen/boundary_tests/runtime_probe_boot.py
+            '
