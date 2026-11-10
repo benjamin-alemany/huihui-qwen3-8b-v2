@@ -24,6 +24,8 @@ for directory in ('opt/qwen/model-notices','opt/qwen-model'):
 COPY --chown=0:0 --chmod=0444 offline_cache.py /opt/qwen/offline_cache.py
 COPY --chown=0:0 --chmod=0444 model-manifest.json /opt/qwen/model-manifest.json
 COPY --link --chown=0:0 --chmod=0444 dummy/* /opt/qwen-model/
+# Match the observed published OCI metadata: root directory mode 0444.
+RUN chmod 0444 /opt/qwen-model
 ''')
 (target/'Dockerfile.fixed').write_text('''FROM qwen-copy-mode-bad:fixture
 COPY --link --chown=0:0 --chmod=0555 opt/ /opt/
