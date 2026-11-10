@@ -11,6 +11,16 @@ on:
         description: Successful chat-boundary-cpu run covering the selected unchanged source
         required: true
         type: string
+      diagnostic_digest:
+        description: Optional exact existing diagnostic digest for CPU review only, without rebuilding
+        required: false
+        default: ''
+        type: string
+      diagnostic_audit_sha256:
+        description: Compiled observer hash from the existing diagnostic build
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
@@ -141,3 +151,5 @@ jobs:
     uses: ./.github/workflows/cuda-diagnostic-image.yml
     with:
       cpu_run_id: ${{ inputs.cpu_run_id }}
+      candidate_digest: ${{ inputs.diagnostic_digest }}
+      audit_sha256: ${{ inputs.diagnostic_audit_sha256 }}

@@ -5,13 +5,21 @@ on:
       cpu_run_id:
         required: true
         type: string
+      candidate_digest:
+        required: false
+        default: ''
+        type: string
+      audit_sha256:
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
   packages: write
 jobs:
   build:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && inputs.candidate_digest == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:
@@ -97,6 +105,7 @@ jobs:
         run: docker logout ghcr.io
   verify-artifact:
     needs: build
+    if: always() && github.event.repository.visibility == 'public' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.candidate_digest != ''))
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -107,7 +116,7 @@ jobs:
           persist-credentials: false
       - name: Require free ephemeral disk and pull the exact public digest
         env:
-          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest }}
+          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest || inputs.candidate_digest }}
         run: |
           set -euo pipefail
           [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -116,6 +125,6 @@ jobs:
           docker pull "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2@$CANDIDATE_DIGEST"
       - name: Review published configuration bytes and protected model-free boot
         env:
-          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest }}
-          AUDIT_SHA256: ${{ needs.build.outputs.audit_sha256 }}
+          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest || inputs.candidate_digest }}
+          AUDIT_SHA256: ${{ needs.build.outputs.audit_sha256 || inputs.audit_sha256 }}
         run: python3 -I -B chat/boundary_tests/verify_cuda_image.py

@@ -56,7 +56,10 @@ print('Published amd64 config, protected source/observer hashes and absent offli
 now=dt.datetime.now(dt.timezone.utc)
 iso=lambda x:x.isoformat().replace('+00:00','Z')
 canary='DUMMY-CONTROL-CANARY-NEVER-REAL-KEY'
-args=[*common,'--cap-drop','ALL','--cap-add','SETUID','--cap-add','SETGID',
+# Trusted root bootstrap needs ownership/mode setup before it drops all child
+# capabilities. These are ordinary container-bootstrap capabilities, CPU only.
+# The actual inference child must still report capabilities_empty below.
+args=[*common,'--cap-drop','ALL','--cap-add','CHOWN','--cap-add','FOWNER','--cap-add','SETUID','--cap-add','SETGID',
       '-e','RUNPOD_API_KEY='+canary,'-e','VLLM_API_KEY=DUMMY-INFERENCE-'+('x'*40),
       '-e','CHAT_CLOUD_GUARDS_VERIFIED=true','-e','CHAT_RESERVED_AT='+iso(now),
       '-e','CHAT_DEADLINE_UTC='+iso(now+dt.timedelta(minutes=2)),image]
