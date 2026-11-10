@@ -13,3 +13,4 @@ node_modules/
 *.private.*
 *.local.json*
 .DS_Store
+chat/model-cache/

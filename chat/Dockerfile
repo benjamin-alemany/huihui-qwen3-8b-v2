@@ -2,4 +2,6 @@
 FROM ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c
 USER root
 COPY --link credential_boot.py credential_boundary.py credential_probe.py inference_only.py model_boot.py network_boundary.py offline_cache.py model-manifest.json chat_server.py /opt/qwen/
+COPY --link loopback_ifaddrs.c /opt/qwen/loopback_ifaddrs.c
+RUN --network=none cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack -o /opt/qwen/loopback_ifaddrs.so /opt/qwen/loopback_ifaddrs.c && chmod 0444 /opt/qwen/loopback_ifaddrs.so
 ENTRYPOINT ["python3", "-I", "-S", "-B", "/opt/qwen/credential_boot.py"]

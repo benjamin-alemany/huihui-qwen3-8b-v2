@@ -14,6 +14,6 @@ for(const [suite,config]of Object.entries({chat:'vitest.chat.config.mjs',control
 const suite=process.argv[2]??'all';if(!['all','inference',...Object.keys(commands)].includes(suite))throw Error('Unknown test suite');
 for(const args of suite==='all'?Object.values(commands):suite==='inference'?[]:[commands[suite]]){const r=spawnSync(process.execPath,args,{cwd:new URL('../cloudflare-backup/',import.meta.url),env:process.env,stdio:'inherit'});if(r.error)throw r.error;if(r.status!==0){process.exitCode=r.status??1;break;}if(existsSync(process.env.UNJAILED_TEST_VIOLATION_FILE)){console.error('Unexpected auxiliary Worker outbound request; refusing a passing result.');process.exitCode=1;break;}}
 if(!process.exitCode&&['all','inference'].includes(suite)){
- const r=spawnSync('/usr/bin/python3',['-B','-m','unittest','chat.test_chat_server','chat.test_network_boundary','chat.test_boot','chat.test_credential_boundary','chat.test_offline_cache'],{cwd:new URL('../',import.meta.url),env:process.env,stdio:'inherit'});
+ const r=spawnSync('/usr/bin/python3',['-B','-m','unittest','chat.test_chat_server','chat.test_network_boundary','chat.test_boot','chat.test_credential_boundary','chat.test_offline_cache','chat.test_cache_materialize'],{cwd:new URL('../',import.meta.url),env:process.env,stdio:'inherit'});
  if(r.error)throw r.error;process.exitCode=r.status??1;
 }

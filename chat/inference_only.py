@@ -39,6 +39,10 @@ def main():
     boundary.assert_clean_boot()
     deadline = deadline_from(os.environ)
     model_env = boundary.model_environment(os.environ)
+    # Fixed trusted compatibility code, never inherited/caller-selected. It only
+    # reports loopback interface metadata; kernel network restrictions stay on.
+    model_env['LD_PRELOAD'] = '/opt/qwen/loopback_ifaddrs.so'
+    model_env['GLOO_SOCKET_IFNAME'] = 'lo'
     boundary.prepare_filesystem()
     requested = [False]
     for sig in (signal.SIGTERM, signal.SIGINT):

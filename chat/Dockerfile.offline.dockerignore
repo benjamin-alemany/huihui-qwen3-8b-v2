@@ -1,0 +1,14 @@
+**
+!Dockerfile.offline
+!credential_boot.py
+!credential_boundary.py
+!credential_probe.py
+!inference_only.py
+!model_boot.py
+!network_boundary.py
+!offline_cache.py
+!model-manifest.json
+!chat_server.py
+!loopback_ifaddrs.c
+!model-cache/
+!model-cache/**

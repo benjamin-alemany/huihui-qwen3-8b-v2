@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import re
 MODEL_ROOT=Path('/opt/qwen-model')
 MANIFEST=Path('/opt/qwen/model-manifest.json')
 MODEL='huihui-ai/Huihui-Qwen3-8B-abliterated-v2'
@@ -23,9 +24,18 @@ def verify_cache(root=MODEL_ROOT,manifest=MANIFEST,*,owner_uid=0):
  if set(m)!= {'model','revision','files'} or m['model']!=MODEL or m['revision']!=REVISION or not isinstance(m['files'],dict):raise CacheError('Wrong pinned manifest')
  return verify_files(root,m,owner_uid=owner_uid)
 
-def verify_files(root,m,*,owner_uid):
+def manifest_files(m):
  expected=m['files']
- if not {'config.json','tokenizer.json','tokenizer_config.json','model.safetensors.index.json'}.issubset(expected) or len(expected)>64 or any('/' in n or n in ('.','..') or not n.endswith(('.json','.safetensors','.txt','.jinja')) for n in expected):raise CacheError('Unexpected model file list')
+ if not isinstance(expected,dict) or not {'config.json','tokenizer.json','tokenizer_config.json','model.safetensors.index.json'}.issubset(expected) or len(expected)>64 or any(not isinstance(n,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',n) or not n.endswith(('.json','.safetensors','.txt','.jinja')) for n in expected):raise CacheError('Unexpected model file list')
+ for item in expected.values():
+  if not isinstance(item,dict) or set(item)!={'size','algorithm','digest'} or type(item['size']) is not int or not 0<item['size']<=8*1024**3:raise CacheError('Invalid manifest item')
+  length={'sha256':64,'git-sha1':40}.get(item['algorithm'])
+  if not length or not isinstance(item['digest'],str) or not re.fullmatch('[0-9a-f]{'+str(length)+'}',item['digest']):raise CacheError('Invalid manifest digest')
+ if sum(i['size'] for i in expected.values())>32*1024**3:raise CacheError('Cache too large')
+ return expected
+
+def verify_files(root,m,*,owner_uid):
+ expected=manifest_files(m)
  if {p.name for p in root.iterdir()}!=set(expected):raise CacheError('Missing or extra model files')
  for name,item in expected.items():
   p=root/name;info=trusted(p,owner_uid)

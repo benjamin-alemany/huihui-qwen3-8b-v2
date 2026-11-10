@@ -11,3 +11,4 @@
 !offline_cache.py
 !model-manifest.json
 !chat_server.py
+!loopback_ifaddrs.c

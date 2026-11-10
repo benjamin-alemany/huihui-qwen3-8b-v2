@@ -23,6 +23,7 @@ jobs:
           python3 -B chat/test_network_boundary.py
           python3 -B chat/test_credential_boundary.py
           python3 -B chat/test_chat_server.py
+          python3 -B chat/test_cache_materialize.py
           python3 -B -m unittest discover -s tests -v
       - name: Verify inherited Linux network boundary with dummy loopback data
         run: timeout 35s python3 -I -B chat/network_probe.py
@@ -54,5 +55,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            -o "$RUNNER_TEMP/loopback_ifaddrs.so" chat/loopback_ifaddrs.c
           env -i PATH="$RUNNER_TEMP/qwen-transport-venv/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP/qwen-transport-home" \
+            LD_PRELOAD="$RUNNER_TEMP/loopback_ifaddrs.so" GLOO_SOCKET_IFNAME=lo \
             timeout 50s "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -B chat/boundary_tests/transport_probe.py

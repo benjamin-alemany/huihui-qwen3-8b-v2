@@ -22,7 +22,7 @@ BOOT_KEYS = {"VLLM_API_KEY", "CHAT_CLOUD_GUARDS_VERIFIED", "CHAT_RESERVED_AT", "
              "LD_LIBRARY_PATH"}
 MODEL_KEYS = BOOT_KEYS - {"CHAT_CLOUD_GUARDS_VERIFIED", "CHAT_RESERVED_AT", "CHAT_DEADLINE_UTC"}
 MODEL_KEYS |= {"PATH", "LANG", "LC_ALL", "HOME", "HF_HOME", "TMPDIR", "PYTHONPATH", "HF_HUB_DISABLE_TELEMETRY",
-               "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "VLLM_HOST_IP", "VLLM_LOOPBACK_IP", "VLLM_RPC_BASE_PATH", "VLLM_ENABLE_V1_MULTIPROCESSING", "DO_NOT_TRACK", "VLLM_NO_USAGE_STATS", "VLLM_LOGGING_LEVEL", "TOKENIZERS_PARALLELISM"}
+               "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "VLLM_HOST_IP", "VLLM_LOOPBACK_IP", "VLLM_RPC_BASE_PATH", "VLLM_ENABLE_V1_MULTIPROCESSING", "LD_PRELOAD", "GLOO_SOCKET_IFNAME", "DO_NOT_TRACK", "VLLM_NO_USAGE_STATS", "VLLM_LOGGING_LEVEL", "TOKENIZERS_PARALLELISM"}
 FORBIDDEN_PATHS = ("/root", "/run/secrets", "/.runpod", "/etc/runpod", "/opt/qwen/.env",
                    "/home/inference/.runpod", "/home/inference/.aws", "/home/inference/.config/runpod",
                    "/cache/.runpod", "/tmp/.runpod", "/var/run/docker.sock", "/run/containerd/containerd.sock")
@@ -92,7 +92,7 @@ def assert_clean_boot():
 
 def assert_trusted_application(directory):
     directory = Path(directory)
-    for path in [directory, *directory.parents, *directory.glob("*.py")]:
+    for path in [directory, *directory.parents, *directory.glob("*.py"), *directory.glob("*.so")]:
         info = path.lstat()
         if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
             raise BoundaryError("Application code or parent directory is writable or untrusted")
@@ -137,7 +137,7 @@ def prepare_filesystem():
 
 def model_environment(source):
     check_names(source)
-    result = {name: source[name] for name in MODEL_KEYS if name in source}
+    result = {name: source[name] for name in MODEL_KEYS - {'LD_PRELOAD', 'GLOO_SOCKET_IFNAME'} if name in source}
     result.update(PATH=source["PATH"], HOME="/home/inference", HF_HOME="/cache/huggingface",
                   LANG="C.UTF-8", LC_ALL="C.UTF-8",
                   TMPDIR="/tmp/qwen-inference", PYTHONPATH="/opt/qwen", HF_HUB_DISABLE_TELEMETRY="1",
@@ -187,6 +187,8 @@ def verify_child():
     check_names(names)
     if set(os.environ) - MODEL_KEYS or set(names) - MODEL_KEYS:
         raise BoundaryError("Unexpected child environment")
+    if 'LD_PRELOAD' in os.environ and os.environ['LD_PRELOAD'] != '/opt/qwen/loopback_ifaddrs.so':
+        raise BoundaryError('Unexpected runtime compatibility library')
     fields = status_fields()
     if fields.get("NoNewPrivs", "").strip() != "1" or any(
             int(fields.get(key, "1"), 16) for key in ("CapEff", "CapPrm", "CapInh", "CapAmb")):
