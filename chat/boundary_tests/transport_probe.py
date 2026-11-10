@@ -12,7 +12,7 @@ from datetime import timedelta
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import network_boundary
 
-os.environ.update(GLOO_SOCKET_IFNAME='lo', OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
+os.environ.update(OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
 receipt = network_boundary.install()  # Before Torch imports and native threads.
 import torch
 import torch.distributed as dist
