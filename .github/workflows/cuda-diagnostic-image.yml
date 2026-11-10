@@ -1,0 +1,116 @@
+name: Approved model-free CUDA diagnostic image
+on:
+  workflow_call:
+    inputs:
+      cpu_run_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  packages: write
+jobs:
+  build:
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+      audit_sha256: ${{ steps.compile.outputs.audit_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Gate on successful CPU observer verification and unchanged source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CPU_RUN_ID: ${{ inputs.cpu_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CPU_RUN_ID" =~ ^[0-9]{1,20}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID" > "$RUNNER_TEMP/cpu-proof.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID/jobs" > "$RUNNER_TEMP/cpu-jobs.json"
+          python3 - <<'PY'
+          import json,os,subprocess
+          p=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-proof.json'))
+          assert p['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert p['path']=='.github/workflows/chat-boundary-cpu.yml'
+          assert p['status']=='completed' and p['conclusion']=='success'
+          jobs=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-jobs.json'))['jobs']
+          assert any(j['name']=='cuda-diagnostic / verify' and j['conclusion']=='success' for j in jobs)
+          sha=p['head_sha'];assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          subprocess.run(['git','merge-base','--is-ancestor',sha,'HEAD'],check=True)
+          paths=['chat/cuda_diagnostic.py','chat/cuda_syscall_audit.c','chat/loopback_ifaddrs.c','chat/network_boundary.py','chat/credential_boot.py','chat/credential_boundary.py','chat/inference_only.py','chat/test_cuda_diagnostic.py','chat/boundary_tests/fake_cuda.c','chat/boundary_tests/cuda_audit_probe.py','chat/boundary_tests/check_cuda_audit.py']
+          subprocess.run(['git','diff','--exit-code',sha,'HEAD','--',*paths],check=True)
+          PY
+      - name: Require free standard-runner disk, never a paid runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          python3 -c 'import shutil; assert shutil.disk_usage("/").free > 46*1024**3, "Insufficient free ephemeral disk; stop"'
+          test "$(docker buildx inspect default --format '{{.Driver}}')" = docker
+      - name: Compile reviewed numeric observer with existing compatibility code
+        id: compile
+        run: |
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            chat/loopback_ifaddrs.c chat/cuda_syscall_audit.c -o chat/diagnostic-loopback_ifaddrs.so
+          python3 - <<'PY'
+          import hashlib,os
+          digest=hashlib.sha256(open('chat/diagnostic-loopback_ifaddrs.so','rb').read()).hexdigest()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('audit_sha256='+digest+'\n')
+          print('DIAGNOSTIC_AUDIT_SHA256='+digest)
+          PY
+      - name: Build only the model-free diagnostic on the existing daemon
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2:cuda-diagnostic-$GITHUB_SHA"
+          docker buildx build --builder default --platform linux/amd64 --provenance=false --load \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image" -f chat/Dockerfile.cuda-diagnostic chat
+      - name: Authenticate only the existing GHCR package
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish unique diagnostic tag and capture immutable digest
+        id: publish
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2:cuda-diagnostic-$GITHUB_SHA"
+          docker push "$image"
+          docker image inspect "$image" > "$RUNNER_TEMP/diagnostic-image-inspect.json"
+          python3 - <<'PY'
+          import json,os,re
+          p=json.load(open(os.environ['RUNNER_TEMP']+'/diagnostic-image-inspect.json'))[0]
+          digest=p['RepoDigests'][0].rsplit('@',1)[1]
+          assert re.fullmatch('sha256:[0-9a-f]{64}',digest)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('digest='+digest+'\n')
+          print('CUDA_DIAGNOSTIC_DIGEST='+digest)
+          print('UNCOMPRESSED_BYTES='+str(p['Size']))
+          PY
+      - name: Remove ephemeral registry login
+        if: always()
+        run: docker logout ghcr.io
+  verify-artifact:
+    needs: build
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Require free ephemeral disk and pull the exact public digest
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          python3 -c 'import shutil; assert shutil.disk_usage("/").free > 46*1024**3, "Insufficient free ephemeral disk; stop"'
+          docker pull "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2@$CANDIDATE_DIGEST"
+      - name: Review published configuration bytes and protected model-free boot
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest }}
+          AUDIT_SHA256: ${{ needs.build.outputs.audit_sha256 }}
+        run: python3 -I -B chat/boundary_tests/verify_cuda_image.py

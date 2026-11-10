@@ -5,10 +5,10 @@ on:
       approval:
         description: Requires separate owner permission to download and publicly redistribute 16.4 GB of pinned model files
         type: choice
-        options: [not-approved, approve-public-offline-image]
+        options: [not-approved, approve-public-offline-image, approve-public-cuda-diagnostic]
         default: not-approved
       cpu_run_id:
-        description: Successful chat-boundary-cpu run covering the unchanged inference source
+        description: Successful chat-boundary-cpu run covering the selected unchanged source
         required: true
         type: string
 permissions:
@@ -100,6 +100,7 @@ jobs:
           docker buildx rm qwen-offline-builder || true
   verify-artifact:
     needs: build
+    if: inputs.approval == 'approve-public-offline-image'
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -135,3 +136,8 @@ jobs:
           assert chat_server.engine_options(path)["distributed_executor_backend"]=="uni"
           print("Exact candidate offline-cache hashes/ownership, inherited policy, pinned runtime imports and chat-only configuration verified. No model/GPU initialized; Runpod validation remains pending.")
           '
+  cuda-diagnostic:
+    if: inputs.approval == 'approve-public-cuda-diagnostic'
+    uses: ./.github/workflows/cuda-diagnostic-image.yml
+    with:
+      cpu_run_id: ${{ inputs.cpu_run_id }}
