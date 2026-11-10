@@ -36,8 +36,8 @@ Therefore do not promise that a separately launched runtime probe automatically
 becomes the website-controlled session, and do not mark the image approved first.
 The conservative plan has two distinct sequential creates, with no retries:
 
-1. Exact-image runtime validation: one Secure A40, fixed six-minute deadline with
-   independent prearmed cloud guards and a two-minute operational cleanup margin.
+1. Exact-image runtime validation: one Secure A40, fixed eighteen-minute deadline with
+   independent prearmed cloud guards and a five-minute operational cleanup margin.
    Inspect credential/kernel/cache receipts, CUDA identity and startup; confirm
    authenticated health and a bounded text response with no tools. Unsupported
    restrictions or startup failure end the attempt; never relax protection.
@@ -58,21 +58,31 @@ If phase one fails, phase two is not launched.
 
 ## Current planning quote, not spending authority
 
+The earlier six-minute runtime/$0.32 combined proposal is superseded. The actual
+published image is 22,104,667,316 compressed bytes; give its cold start a bounded
+eighteen-minute window. Recommend approval of ONLY the first runtime attempt,
+with a $0.25 operational allowance. A successful first phase does not authorize
+the website phase. Before any create, stage/test the exact candidate guard pins
+and timing, prove both independent cloud guards are current and scheduled, and
+keep the public website release pin null until intended-runtime validation passes.
+
 November 9 Runpod get-gpu-type read: Secure A40, 48 GB, $0.59/hour, LOW stock in
-CA-MTL-1 with host CUDA 13.2. A 60 GB temporary container disk is $6/month at the
+CA-MTL-1 and EU-SE-1 with host CUDA 13.2. A 60 GB temporary container disk is $6/month at the
 published $0.10/GB/month rate; budget the combined rate at $0.60/hour. No persistent
 volume or independent backup service is part of this chat test.
 
 | Item | Operational planning amount |
 |---|---:|
 | Public GitHub standard runner, temporary build disk and existing public GHCR | $0 at current published terms |
-| Runtime phase: up to 8 billed minutes including cleanup margin | $0.08 |
+| Runtime phase: 18-minute window + 5-minute cleanup margin | $0.23 |
+| Recommended first-phase operational allowance | $0.25 |
 | Website phase: 18 minutes plus 5-minute shutdown/cleanup margin | $0.23 |
-| Proposed combined incremental allowance, rounded up | $0.32 |
+| Combined estimate if both phases are later approved | $0.46 |
+| Combined operational allowance if separately approved | $0.50 |
 | New persistent storage, backup service or paid hosting | $0; none proposed |
 
 Cold image pull, cache hashing and model startup consume the timed allowance;
-these durations do not promise six/eighteen minutes of usable chat. Fixed cloud
+these durations do not promise eighteen minutes of usable chat. Fixed cloud
 deadlines and monitoring are operational controls, not a provider-enforced dollar
 cap. Tax/FX and exceptional provider stop delays are excluded. Requote if the
 rate, disk, artifact size, scope or stock changes; never substitute a pricier GPU.
