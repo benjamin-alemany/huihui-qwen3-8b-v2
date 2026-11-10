@@ -14,3 +14,5 @@
 !model-notices/*
 !model-cache/
 !model-cache/**
+!image-layout/
+!image-layout/**

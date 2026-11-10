@@ -59,6 +59,7 @@ jobs:
           PY
       - name: Compile fixed compatibility library without install hooks
         run: |
+          mkdir -p chat/image-layout/opt/qwen/model-notices chat/image-layout/opt/qwen-model
           cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack -o chat/loopback_ifaddrs.so chat/loopback_ifaddrs.c
           sha256sum chat/loopback_ifaddrs.so chat/model-manifest.json
       - name: Materialize pinned public files without inherited credentials

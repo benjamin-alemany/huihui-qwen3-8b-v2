@@ -13,4 +13,6 @@ COPY --link --chown=0:0 --chmod=0444 model-cache/model-00002-of-00004.safetensor
 COPY --link --chown=0:0 --chmod=0444 model-cache/model-00003-of-00004.safetensors /opt/qwen-model/model-00003-of-00004.safetensors
 COPY --link --chown=0:0 --chmod=0444 model-cache/model-00004-of-00004.safetensors /opt/qwen-model/model-00004-of-00004.safetensors
 COPY --link --chown=0:0 --chmod=0444 model-cache/*.json model-cache/*.txt model-cache/*.jinja /opt/qwen-model/
+# Directory metadata is a separate layer: data stays 0444, directories need X.
+COPY --link --chown=0:0 --chmod=0555 image-layout/opt/ /opt/
 ENTRYPOINT ["python3", "-I", "-S", "-B", "/opt/qwen/credential_boot.py"]
