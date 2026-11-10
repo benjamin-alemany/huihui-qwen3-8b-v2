@@ -48,7 +48,12 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
           python3 -c 'import shutil; assert shutil.disk_usage("/").free > 46*1024**3, "Insufficient free ephemeral disk; stop"'
-          test "$(docker buildx inspect default --format '{{.Driver}}')" = docker
+          docker buildx inspect default > "$RUNNER_TEMP/default-builder.txt"
+          python3 - <<'PY'
+          import os,re
+          text=open(os.environ['RUNNER_TEMP']+'/default-builder.txt').read()
+          assert re.search(r'^Driver:\s+docker\s*$',text,re.M), 'Require existing docker driver; no replacement builder'
+          PY
       - name: Compile reviewed numeric observer with existing compatibility code
         id: compile
         run: |
