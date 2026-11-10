@@ -15,7 +15,7 @@ class NetworkTests(unittest.TestCase):
  def test_boundary_runs_before_torch_or_model_code(self):
   source=(HERE/'model_boot.py').read_text()
   self.assertLess(source.index('network_boundary.install()'),source.index('import torch'))
-  self.assertLess(source.index('network_boundary.install()'),source.index('os.execvp'))
+  self.assertLess(source.index('network_boundary.install()'),source.index('chat_server.serve('))
  def test_no_privileged_network_admin_fallback(self):
   source=(HERE/'network_boundary.py').read_text();ast.parse(source)
   for text in ['iptables','nftables','subprocess','http://','https://']:self.assertNotIn(text,source)

@@ -5,7 +5,7 @@ import {dirname,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {preflight,root} from './preflight.mjs';
 preflight();
-const suite=process.argv[2]??'all';if(!['all','node','chat','controller','guard'].includes(suite)||process.argv.length>3)throw Error('Unknown test suite');
+const suite=process.argv[2]??'all';if(!['all','node','chat','controller','guard','inference'].includes(suite)||process.argv.length>3)throw Error('Unknown test suite');
 const temporary=mkdtempSync(join(tmpdir(),'unjailed-tests-'));
 const env={PATH:dirname(process.execPath)+':/usr/bin:/bin:/usr/sbin:/sbin',TMPDIR:temporary,CI:'1',WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:join(temporary,'wrangler.log'),UNJAILED_TEST_VIOLATION_FILE:join(temporary,'unexpected-outbound'),NODE_OPTIONS:'--import='+pathToFileURL(join(root,'.codex/deny-fetch.mjs')).href};
 let command,args;

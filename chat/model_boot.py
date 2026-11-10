@@ -21,10 +21,10 @@ def main():
     print("CHAT_RUNTIME " + json.dumps({"uid": os.getuid(), "gid": os.getgid(),
           "gpu": torch.cuda.get_device_name(0), "vram_bytes": properties.total_memory,
           "control_key_present": False, "credential_boundary": receipt}), flush=True)
-    import start
-    args = start.arguments()
-    args[2] = model_path
-    os.execvp(args[0], args)
+    # Official async serving requires named ZMQ IPC. The synchronous in-process
+    # path avoids it; the inherited kernel policy still refuses any hidden use.
+    import chat_server
+    chat_server.serve(model_path)
 
 
 if __name__ == "__main__":

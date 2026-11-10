@@ -22,7 +22,7 @@ BOOT_KEYS = {"VLLM_API_KEY", "CHAT_CLOUD_GUARDS_VERIFIED", "CHAT_RESERVED_AT", "
              "LD_LIBRARY_PATH"}
 MODEL_KEYS = BOOT_KEYS - {"CHAT_CLOUD_GUARDS_VERIFIED", "CHAT_RESERVED_AT", "CHAT_DEADLINE_UTC"}
 MODEL_KEYS |= {"PATH", "LANG", "LC_ALL", "HOME", "HF_HOME", "TMPDIR", "PYTHONPATH", "HF_HUB_DISABLE_TELEMETRY",
-               "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "VLLM_HOST_IP", "VLLM_LOOPBACK_IP", "VLLM_RPC_BASE_PATH", "DO_NOT_TRACK", "VLLM_NO_USAGE_STATS", "VLLM_LOGGING_LEVEL", "TOKENIZERS_PARALLELISM"}
+               "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "VLLM_HOST_IP", "VLLM_LOOPBACK_IP", "VLLM_RPC_BASE_PATH", "VLLM_ENABLE_V1_MULTIPROCESSING", "GLOO_SOCKET_IFNAME", "DO_NOT_TRACK", "VLLM_NO_USAGE_STATS", "VLLM_LOGGING_LEVEL", "TOKENIZERS_PARALLELISM"}
 FORBIDDEN_PATHS = ("/root", "/run/secrets", "/.runpod", "/etc/runpod", "/opt/qwen/.env",
                    "/home/inference/.runpod", "/home/inference/.aws", "/home/inference/.config/runpod",
                    "/cache/.runpod", "/tmp/.runpod", "/var/run/docker.sock", "/run/containerd/containerd.sock")
@@ -143,7 +143,8 @@ def model_environment(source):
                   TMPDIR="/tmp/qwen-inference", PYTHONPATH="/opt/qwen", HF_HUB_DISABLE_TELEMETRY="1",
                   HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", DO_NOT_TRACK="1", VLLM_NO_USAGE_STATS="1", VLLM_LOGGING_LEVEL="WARNING",
                   TOKENIZERS_PARALLELISM="false", VLLM_HOST_IP="127.0.0.1",
-                  VLLM_LOOPBACK_IP="127.0.0.1", VLLM_RPC_BASE_PATH="/tmp/qwen-inference")
+                  VLLM_LOOPBACK_IP="127.0.0.1", VLLM_RPC_BASE_PATH="/tmp/qwen-inference",
+                  VLLM_ENABLE_V1_MULTIPROCESSING="0", GLOO_SOCKET_IFNAME="lo")
     return result
 
 
@@ -195,6 +196,9 @@ def verify_child():
     assert_unreadable_process(os.getppid())
     if os.getppid() != 1:
         assert_unreadable_process(1)
+    for fd in (0, 1, 2):
+        if stat.S_ISSOCK(os.fstat(fd).st_mode):
+            raise BoundaryError("Standard descriptors must not carry sockets")
     for name in os.listdir("/proc/self/fd"):
         if name.isdigit() and int(name) > 2:
             try:

@@ -2,7 +2,8 @@
 
 Landlock denies every TCP connect (including loopback); libseccomp disallows
 non-TCP Internet sockets, alternate families and io_uring network bypasses.
-UNIX IPC and inbound TCP accept/replies remain possible. Not a filesystem sandbox.
+Named/abstract UNIX sockets and all connect() calls are denied. Anonymous UNIX
+socketpairs and inbound TCP accept/replies remain possible. Not a filesystem sandbox.
 """
 import ctypes as C
 import errno
@@ -64,11 +65,23 @@ def install():
         if sec.seccomp_rule_add_array(ctx,0x50000 | errno.EPERM,number,len(rules),rules):
             raise NetworkBoundaryError('Seccomp rule refused')
     try:
-        # SCMP_CMP_NE=1, EQ=4, MASKED_EQ=7. A socket must be UNIX or TCP/IP.
+        # SCMP_CMP_NE=1, EQ=4, MASKED_EQ=7. No named UNIX sockets: this
+        # avoids pathname/abstract proxies without depending on Landlock ABI 9.
+        deny('socket', (Compare(0,4,1,0),))
+        deny('connect')
+        # No descriptor theft from a less restricted sibling/ancestor.
+        for name in ('pidfd_getfd','ptrace','process_vm_readv','process_vm_writev'):
+            deny(name)
         deny('socket', (Compare(0,6,10,0),))
         for family in (0,3,4,5,6,7,8,9):
             deny('socket', (Compare(0,4,family,0),))
         deny('socketpair', (Compare(0,1,1,0),))
+        # Datagram pairs can sendto() an unrelated named UNIX socket without
+        # connect(). Only already-connected anonymous STREAM pairs are safe.
+        for kind in range(0,16):
+            if kind != 1:
+                deny('socketpair', (Compare(1,7,15,kind),))
+        deny('socketpair', (Compare(2,1,0,0),))
         for family in (2,10):
             # Block all base socket types except STREAM, including flags on DGRAM.
             for kind in range(0,16):
@@ -83,6 +96,8 @@ def install():
             raise NetworkBoundaryError('Seccomp enforcement refused')
     finally:
         sec.seccomp_release(ctx)
-    return {'policy':'no-internet-connect-v1','landlock_abi':abi,'tcp_connect_denied':True,
+    return {'policy':'inbound-only-no-named-ipc-v2','landlock_abi':abi,'tcp_connect_denied':True,
             'internet_datagrams_denied':True,'alternate_socket_families_denied':True,
-            'io_uring_denied':True,'inherited_by_children':True}
+            'io_uring_denied':True,'inherited_by_children':True,
+            'named_unix_sockets_denied':True,'all_connect_denied':True,
+            'cross_process_descriptor_access_denied':True}

@@ -22,6 +22,7 @@ jobs:
           python3 -B chat/test_offline_cache.py
           python3 -B chat/test_network_boundary.py
           python3 -B chat/test_credential_boundary.py
+          python3 -B chat/test_chat_server.py
           python3 -B -m unittest discover -s tests -v
       - name: Verify inherited Linux network boundary with dummy loopback data
         run: timeout 35s python3 -I -B chat/network_probe.py
@@ -29,3 +30,29 @@ jobs:
         run: docker build --platform linux/amd64 -t qwen-chat-boundary-cpu:ci -f chat/boundary_tests/Dockerfile chat
       - name: Verify actual Linux protections with dummy data and network disabled
         run: docker run --rm --name qwen-chat-boundary-cpu --platform linux/amd64 --network none --cpus 1 --memory 256m --pids-limit 64 qwen-chat-boundary-cpu:ci
+  transport:
+    # Disposable CPU analogue, NOT serving-image/CUDA/Runpod acceptance.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Install hash-pinned CPU wheels without inherited credentials or hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" = 3.12
+          python3 -m venv "$RUNNER_TEMP/qwen-transport-venv"
+          mkdir "$RUNNER_TEMP/qwen-transport-home"
+          env -i PATH="$RUNNER_TEMP/qwen-transport-venv/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP/qwen-transport-home" \
+            "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -m pip --isolated install \
+            --disable-pip-version-check --no-cache-dir --no-compile --no-deps --only-binary=:all: \
+            --require-hashes --retries 0 --timeout 30 -r chat/boundary_tests/transport-requirements.txt
+      - name: Verify single-rank CPU transport under unchanged outbound and IPC denial
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -i PATH="$RUNNER_TEMP/qwen-transport-venv/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP/qwen-transport-home" \
+            timeout 50s "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -B chat/boundary_tests/transport_probe.py

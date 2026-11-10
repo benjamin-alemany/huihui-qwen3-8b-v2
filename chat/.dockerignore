@@ -10,3 +10,4 @@
 !boundary_tests/**
 !offline_cache.py
 !model-manifest.json
+!chat_server.py
