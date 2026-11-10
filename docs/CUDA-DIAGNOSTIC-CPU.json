@@ -1,0 +1,29 @@
+{
+  "source_sha": "6d98cb4b4fe6b3af2ae0504df6dd2bf757f8ac5c",
+  "workflow_run_id": 42823466926,
+  "workflow_url": "https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42823466926",
+  "conclusion": "success",
+  "local_network_isolated_inference_tests_passed": 37,
+  "native_cpu_fixture": {
+    "fake_cuda_304_observed": true,
+    "named_unix_and_connect_denials_preserved": true,
+    "anonymous_stream_socketpair_allowed": true,
+    "errno_preserved": true,
+    "dummy_canary_not_logged": true,
+    "observer_output_bounded": true
+  },
+  "unchanged_boundary_source_sha256": {
+    "chat/credential_boot.py": "d703c42f7806ff941babf0a696b557036ed5afb7349ca1286feed2470ce6d725",
+    "chat/credential_boundary.py": "153b268a69aad3784b240d8dd2f62deaf7c7e7d38d18e169191493c690a40305",
+    "chat/inference_only.py": "060b1ce87d593382f8e740717b66f70cefcd1ecc24c1a4cf1694a6d28b228cbe",
+    "chat/network_boundary.py": "cc95ce583c45327eb0a27f2479781462b4d1de9b62d56caf59ad6eff4c316211",
+    "chat/loopback_ifaddrs.c": "9d2d63ea495e7c81348c2dd7357ace2d801efe788cab271fa9bb51fa715264cc"
+  },
+  "complete_syscall_trace": false,
+  "runpod_cuda_validated": false,
+  "diagnostic_image_built": false,
+  "diagnostic_image_published": false,
+  "new_paid_resources_started": false,
+  "agent_tools_enabled": false,
+  "network_release_pin_approved": false
+}

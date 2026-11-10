@@ -89,6 +89,13 @@ pairs, preserve errno, bound logs and exclude a dummy secret canary. Fake CUDA
 success/failure is never evidence about a Runpod GPU. The fake library is not in
 the diagnostic image recipe.
 
+Verification passed on source `6d98cb4` in
+[CPU run 42823466926](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42823466926).
+The local network-isolated inference suite passed all 37 tests. Exact source
+hashes of the five unchanged launcher/boundary files and the limited verification
+claims are recorded in `CUDA-DIAGNOSTIC-CPU.json`. The recipe's strict context
+allowlist excludes cached weights, dummy-driver libraries and unrelated files.
+
 If CUDA truly requires an operation that cannot be allowed safely, move egress/IPC
 enforcement to a separately verified host/VM boundary. Do not initialize CUDA
 unrestricted then pass open sockets to the model or silently enable agent tools.
