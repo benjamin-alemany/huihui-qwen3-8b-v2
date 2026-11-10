@@ -1,4 +1,4 @@
-# Project status — 2026-11-09
+# Project status — 2026-11-10
 
 Goal: an owner-only cloud workstation that remains usable without a laptop or
 development assistant running. Phase one is timed private Qwen chat. Phase two
@@ -13,7 +13,10 @@ image in OFFLINE-IMAGE.json passed full cache hashes, ownership, read-only UID
 Run 42741842571 passed both jobs. The first candidate refused startup because a
 cache directory lacked search permission; a regression-tested directory-only
 layer corrected it without changing any application/model layer. All weights
-remained on GitHub/GHCR, not the laptop. Runpod/GPU validation is still pending.
+remained on GitHub/GHCR, not the laptop. One subsequently approved Runpod test
+failed at CUDA initialization (error 304), before model loading. Its Pod was
+stopped/deleted; the candidate remains launch-blocked. A model-free diagnostic
+is prepared in CUDA-DIAGNOSTIC.md without relaxing security or enabling tools.
 
 Main remains at 442408e. PR #2 contains the prepared hardening/recovery release;
 it is not merged or deployed. Dot's initial cleanup patch was already included.
@@ -30,11 +33,11 @@ single-rank Gloo collectives and the actual serving libraries with the new shim.
 The 16-package OSV review returned no matching advisories; its scope excludes
 transitive/OS/CUDA packages and model behavior. See CHAT-SCOPED-ADVISORIES.json.
 
-Read-only Cloudflare checks confirm that controller, gateway and both independent
-stop Workers still serve their November 3 deployments. No deployment was made.
-Production behavior was not reauthenticated or tested against a running GPU in
-this review. Earlier protected configuration recorded Start/guard arming locked;
-deployment history is not a fresh read of all runtime state or Runpod inventory.
+The bounded GPU test verified both current-version scheduled stop guards before
+creation and observed both guards tracking its immutable expiry. Temporary guard
+configuration was restored and all test keys/reservations removed afterward. The
+website/controller were not deployed or unlocked. These operational checks do
+not establish browser-to-GPU acceptance or validate the failed CUDA boundary.
 
 ## Component progress
 
@@ -75,11 +78,9 @@ deployment history is not a fresh read of all runtime state or Runpod inventory.
 5. Address the separate agent workstation phase after chat acceptance. Agent,
    terminal and browsing tools remain disabled throughout phase one.
 
-CHAT-LAUNCH-ACCEPTANCE.md contains the consolidated two-phase proposal and public
-cost sources. The paid phases remain unapproved. Future full model publication
-still requires owner approval and a matching successful source verification.
-
-Only the explicitly approved free cloud download/build/publication occurred.
-No paid resource, production deployment, budget change, automatic GPU retry or
-ten-hour session occurred. Agent tools remain off. Historical estimates are not
-current quotes or spending authorization.
+CHAT-LAUNCH-ACCEPTANCE.md contains the historical bounded proposal and public
+cost sources. The one approved runtime attempt failed and is complete; further
+paid testing and website acceptance require a new quote and approval. No model
+was loaded, no agent tools enabled, and no ten-hour run or automatic retry began.
+Free diagnostic preparation does not authorize paid resources or production
+deployment. Historical estimates are not current spending authorization.

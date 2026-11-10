@@ -47,9 +47,18 @@
   "runtime_imports_verified": true,
   "weights_downloaded_on_github": true,
   "weights_downloaded_locally": false,
-  "gpu_started": false,
+  "gpu_started": true,
   "agent_tools_enabled": false,
   "production_deployed": false,
   "network_release_pin_approved": false,
-  "scope": "Free cloud publication and CPU artifact readback only; Runpod kernel/CUDA/NCCL/full-model validation remains pending."
+  "scope": "CPU artifact verification passed. One separately approved Runpod validation failed at CUDA initialization before weights loaded; network release approval remains false.",
+  "runtime_validation": {
+    "status": "FAILED_CUDA_INITIALIZATION",
+    "cuda_error": 304,
+    "model_loaded": false,
+    "chat_passed": false,
+    "pod_deleted_verified": true,
+    "security_policy_relaxed": false,
+    "new_paid_attempt_authorized": false
+  }
 }
