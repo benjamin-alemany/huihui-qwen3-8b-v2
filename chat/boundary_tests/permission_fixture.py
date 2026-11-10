@@ -6,7 +6,7 @@ import shutil
 import sys
 
 target = Path(sys.argv[1]);target.mkdir()
-cache = target/'dummy';cache.mkdir()
+cache = target/'dummy';cache.mkdir(mode=0o700)
 data = {n: b'{}' for n in ('config.json','tokenizer.json','tokenizer_config.json')}
 data['model.safetensors.index.json'] = json.dumps({'weight_map': {'dummy': 'model-1.safetensors'}}).encode()
 data['model-1.safetensors'] = b'DUMMY_NOT_WEIGHTS'
@@ -14,6 +14,7 @@ manifest = {'model': 'huihui-ai/Huihui-Qwen3-8B-abliterated-v2',
             'revision': '7d89db76029281fd8f3e6698a8e30738608105a9', 'files': {}}
 for name, value in data.items():
     (cache/name).write_bytes(value)
+    (cache/name).chmod(0o444)
     manifest['files'][name] = {'algorithm': 'sha256','size': len(value),'digest': hashlib.sha256(value).hexdigest()}
 (target/'model-manifest.json').write_text(json.dumps(manifest))
 shutil.copyfile(Path(__file__).resolve().parents[1]/'offline_cache.py', target/'offline_cache.py')

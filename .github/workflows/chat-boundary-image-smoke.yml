@@ -26,6 +26,7 @@ jobs:
           if docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL --memory 128m --pids-limit 32 --mount "type=bind,source=$RUNNER_TEMP/mode-fixture/verify.py,target=/verify.py,readonly" qwen-copy-mode-bad:fixture python3 -I -B /verify.py > "$RUNNER_TEMP/bad-mode.log" 2>&1; then
             echo 'Unexpected passing result before directory correction'; exit 1
           fi
+          cat "$RUNNER_TEMP/bad-mode.log"
           python3 -c 'import os; s=open(os.environ["RUNNER_TEMP"]+"/bad-mode.log").read(); assert "PermissionError" in s and "/opt/qwen-model" in s, "Unexpected failure in the negative fixture"'
           docker build --platform linux/amd64 -t qwen-copy-mode-fixed:fixture -f "$RUNNER_TEMP/mode-fixture/Dockerfile.fixed" "$RUNNER_TEMP/mode-fixture"
           docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL --memory 128m --pids-limit 32 --mount "type=bind,source=$RUNNER_TEMP/mode-fixture/verify.py,target=/verify.py,readonly" qwen-copy-mode-fixed:fixture python3 -I -B /verify.py
