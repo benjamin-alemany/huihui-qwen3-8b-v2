@@ -117,3 +117,9 @@ make that fixture pass. Rechecking the same digest avoided another publication.
 [Exact-artifact review 42850263624](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42850263624) passed.
 The serving release pin stays null, agent tools stay disabled, and intended
 Runpod/CUDA validation remains unverified.
+
+## Smaller driver-only follow-up
+
+The large diagnostic can consume the entire fixed deadline extracting its unused serving libraries before the container starts. `Dockerfile.cuda-driver-probe` instead pins the official NVIDIA CUDA 13.0 Ubuntu 24.04 amd64 base by digest, adds only distro Python/libseccomp, and uses the unchanged launcher, credential boundary, network policy and numeric observer. An allowlisted build context excludes weights, fake CUDA libraries, projects and secrets. CPU verification requires size below 1 GiB, protected source hashes, key discard, UID/capability checks and network enforcement before publication. Distro package versions are recorded in the artifact and CI log; package acquisition is restricted to the signed base distribution repositories during the free build.
+
+NVIDIA documents driver library injection via the compute capability in its [Container Toolkit guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html). This probe uses the host driver API directly; it does not require Torch, vLLM or model weights. Its base and Python patch version differ from the serving image, so a result is a driver-only diagnostic, never full-serving acceptance. The serving release pin and all kernel restrictions remain unchanged. No GPU launch is part of the manual free build workflow.

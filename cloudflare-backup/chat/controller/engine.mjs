@@ -1,22 +1,24 @@
+import {applyOperatorBudget} from './budget-reconcile.mjs';
 import {SEED,SCALE,MINUTES,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,receiptFresh} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
 const knownPodIds=s=>[...new Set([...(s.knownPodIds??[]),...(s.pod?[s.pod.id]:[])])];
 // All account state is durable. No network I/O runs inside a transaction.
 export class SessionEngine {
   constructor(storage,deps){this.storage=storage;this.d=deps;}
-  async tx(fn,wakeAt){return this.storage.transaction(async tx=>{const r=await tx.get(recordKey)??{ledger:structuredClone(SEED),session:null,quotes:[]};const result=fn(r);await tx.put(recordKey,r);if(wakeAt!==undefined)await tx.setAlarm(wakeAt);return result;});}
+  async tx(fn,wakeAt){return this.storage.transaction(async tx=>{const r=await tx.get(recordKey)??{ledger:structuredClone(SEED),session:null,quotes:[]};try{applyOperatorBudget(r,this.d.operatorBudget);r.operatorBudgetReconciliation={ready:true};}catch(e){if(!(e instanceof SessionError)||!e.code?.startsWith('OPERATOR_BUDGET_'))throw e;r.operatorBudgetReconciliation={ready:false,code:e.code};}const result=fn(r);await tx.put(recordKey,r);if(wakeAt!==undefined)await tx.setAlarm(wakeAt);return result;});}
   async read(){return this.tx(r=>structuredClone(r));}
-  async status(){const r=await this.read();return {launchEnabled:!!(this.d.enabled&&this.d.connected&&this.d.approval&&!r.ledger.usedApprovals.includes(this.d.approval)),agentToolsEnabled:false,terminalEnabled:false,session:safeSession(r.session),budget:budgetView(r.ledger)};}
+  async status(){const r=await this.read();return {launchEnabled:!!(this.d.enabled&&this.d.connected&&this.d.approval&&!r.ledger.usedApprovals.includes(this.d.approval)&&r.operatorBudgetReconciliation?.ready!==false),agentToolsEnabled:false,terminalEnabled:false,session:safeSession(r.session),budget:budgetView(r.ledger),operatorBudgetReconciliation:r.operatorBudgetReconciliation};}
   async quote(){
     const raw=await this.d.catalog(),catalog=catalogFrom(raw),q={...makeQuote(catalog,this.d.now(),this.d.id()),live:!!this.d.connected};
     const ceiling=this.d.maxHourly??1;
     if(!Number.isFinite(ceiling)||ceiling<=0||ceiling>1||catalog.totalHourly>ceiling)throw new SessionError('PRICE_CHANGED');
-    return this.tx(r=>{r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,launchEnabled:!!(this.d.enabled&&this.d.connected&&this.d.approval&&!r.ledger.usedApprovals.includes(this.d.approval)),budget:budgetView(r.ledger),includes:'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
+    return this.tx(r=>{r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,launchEnabled:!!(this.d.enabled&&this.d.connected&&this.d.approval&&!r.ledger.usedApprovals.includes(this.d.approval)&&r.operatorBudgetReconciliation?.ready!==false),budget:budgetView(r.ledger),includes:'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
   }
   async start(input){
     if(!input||Object.keys(input).sort().join()!=='maximumUSD,quoteId'||typeof input.quoteId!=='string')throw new SessionError('INVALID_START',400);
     await this.tx(r=>{
       if(r.session?.quoteId===input.quoteId)return; // Idempotent even after cleanup.
+      if(r.operatorBudgetReconciliation?.ready===false)throw new SessionError(r.operatorBudgetReconciliation.code);
       if(!this.d.enabled||!this.d.connected||!this.d.approval)throw new SessionError('LAUNCH_LOCKED');
       if(!terminal(r.session))throw new SessionError('SESSION_ALREADY_ACTIVE');
       if(r.ledger.usedApprovals.includes(this.d.approval))throw new SessionError('APPROVAL_ALREADY_USED');
@@ -140,7 +142,7 @@ export class SessionEngine {
           if(this.d.now()>Date.parse(s.reservation.windowEnd))await this.update(s.id,c=>{c.phase='attention';c.code='CREATE_OUTCOME_UNKNOWN';c.stopRequested=true;});
           return; // Hold and guards remain armed until a real outcome is known.
         }
-        if(pods.length!==1||pods.some(p=>p.cost>s.quote.gpuHourlyUSD)||s.stopRequested||this.d.now()>=s.deadline||this.d.now()-s.bootAt>=12*60000&&!s.everReady||pods.some(p=>p.status==='EXITED'||p.status==='ERROR')){
+        if(pods.length!==1||pods.some(p=>p.cost>s.quote.gpuHourlyUSD)||s.stopRequested||this.d.now()>=s.deadline||this.d.now()-s.bootAt>=(MINUTES-1)*60000&&!s.everReady||pods.some(p=>p.status==='EXITED'||p.status==='ERROR')){
           await this.update(s.id,c=>{c.phase='stopping';c.stopRequested=true;c.stopAt??=this.d.now();c.pod??=pods[0];});
           await Promise.allSettled(this.d.guards.map(g=>g.shorten(s.reservation.name,this.d.now())));
           let complete=true;for(const p of pods)if(!await this.d.provider.cleanup(p,s.reservation,Infinity))complete=false;

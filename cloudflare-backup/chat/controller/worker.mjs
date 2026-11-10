@@ -1,3 +1,4 @@
+import {parseOperatorBudget} from './budget-reconcile.mjs';
 import {DurableObject,WorkerEntrypoint} from 'cloudflare:workers';
 import {collectGuardReadiness,safeTailFailure,cloudflareTailClient} from './tails.mjs';
 import {SessionEngine} from './engine.mjs';
@@ -10,9 +11,9 @@ const object=env=>env.SESSION_CONTROLLER.getByName('owner-chat-controller-v1');
 export class ChatSessionController extends DurableObject {
   engine(){
     const connected=!!this.env.RUNPOD_API_KEY,provider=connected?runpodClient(this.env.RUNPOD_API_KEY):null;
-    const now=()=>Date.now();
+    const now=()=>Date.now();let operatorBudget;try{operatorBudget=parseOperatorBudget(this.env.OPERATOR_BUDGET_RECONCILIATION);}catch{operatorBudget={invalid:true};}
     return new SessionEngine(this.ctx.storage,{now,id:()=>crypto.randomUUID(),hex:length=>Array.from(crypto.getRandomValues(new Uint8Array(length/2)),b=>b.toString(16).padStart(2,'0')).join(''),
-      enabled:this.env.START_ENABLED==='true'&&networkReleaseReady(IMAGE),approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:this.env.RUNPOD_API_KEY,
+      operatorBudget,enabled:this.env.START_ENABLED==='true'&&networkReleaseReady(IMAGE)&&operatorBudget!==null&&!operatorBudget.invalid,approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:this.env.RUNPOD_API_KEY,
       maxHourly:Number(this.env.MAX_SESSION_HOURLY_USD??'.60'),maxUSD:Number(this.env.MAX_ACCEPTANCE_USD??'.25'),
       provider,guards:[this.env.PRIMARY_GUARD,this.env.BACKUP_GUARD],
       catalog:()=>connected?provider.catalog():Promise.resolve(JSON.parse(this.env.PREPARED_CATALOG)),

@@ -13,6 +13,10 @@ assert re.fullmatch('sha256:[0-9a-f]{64}',digest) and re.fullmatch('[0-9a-f]{64}
 owner=os.environ['GITHUB_REPOSITORY_OWNER'].lower()
 assert re.fullmatch('[a-z0-9-]+',owner)
 image='ghcr.io/'+owner+'/huihui-qwen3-8b-v2@'+digest
+local=os.environ.get('LOCAL_DRIVER_PROBE')
+if local:
+    assert local=='qwen-cuda-driver-probe:review' and os.environ.get('DRIVER_ONLY')=='true'
+    image=local
 
 def docker(args, timeout=90):
     p=subprocess.run(['docker',*args],capture_output=True,text=True,timeout=timeout)
@@ -29,12 +33,14 @@ for pair in config.get('Env',[]):
     name,_,value=pair.partition('=')
     if value and any(part in name.upper() for part in ('API_KEY','TOKEN','SECRET','PASSWORD','CREDENTIAL')):
         assert name in ('TOKENIZERS_PARALLELISM','HF_HUB_DISABLE_IMPLICIT_TOKEN'),'Credential-like baked environment'
-assert metadata['Size'] < 30*1024**3,'Unexpected diagnostic size; check that no cache was included'
+assert metadata['Size'] < (1024**3 if os.environ.get('DRIVER_ONLY')=='true' else 30*1024**3),'Unexpected diagnostic size; check that no cache was included'
 expected={
  '/opt/qwen/'+name:hashlib.sha256((ROOT/'chat'/name).read_bytes()).hexdigest()
  for name in ('credential_boot.py','credential_boundary.py','inference_only.py','network_boundary.py')}
 expected['/opt/qwen/model_boot.py']=hashlib.sha256((ROOT/'chat/cuda_diagnostic.py').read_bytes()).hexdigest()
 expected['/opt/qwen/loopback_ifaddrs.so']=audit
+if os.environ.get('DRIVER_ONLY')=='true':
+    expected['/opt/qwen/start.py']=hashlib.sha256((ROOT/'start.py').read_bytes()).hexdigest()
 code='''
 import ctypes,hashlib,json,os,stat
 from pathlib import Path

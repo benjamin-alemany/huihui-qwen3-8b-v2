@@ -5,7 +5,7 @@ on:
       approval:
         description: Requires separate owner permission to download and publicly redistribute 16.4 GB of pinned model files
         type: choice
-        options: [not-approved, approve-public-offline-image, approve-public-cuda-diagnostic]
+        options: [not-approved, approve-public-offline-image, approve-public-cuda-diagnostic, approve-public-driver-probe]
         default: not-approved
       cpu_run_id:
         description: Successful chat-boundary-cpu run covering the selected unchanged source
@@ -153,3 +153,7 @@ jobs:
       cpu_run_id: ${{ inputs.cpu_run_id }}
       candidate_digest: ${{ inputs.diagnostic_digest }}
       audit_sha256: ${{ inputs.diagnostic_audit_sha256 }}
+
+  driver-probe:
+    if: github.event.repository.visibility == 'public' && inputs.approval == 'approve-public-driver-probe'
+    uses: ./.github/workflows/cuda-driver-probe.yml
