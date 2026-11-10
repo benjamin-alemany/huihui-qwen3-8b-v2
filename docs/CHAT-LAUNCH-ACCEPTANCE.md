@@ -5,7 +5,7 @@ this document. Agent, terminal and browsing tools remain off; no ten-hour run.
 
 ## Build and artifact gate
 
-The manual chat-offline-image workflow is prepared with approval defaulting to
+The manual chat-image workflow is prepared with approval defaulting to
 not-approved. It requires a successful complete CPU workflow covering unchanged
 inference source, a public repository and a standard free Ubuntu runner. It stops
 if free ephemeral disk is insufficient; never select a paid/larger runner or
