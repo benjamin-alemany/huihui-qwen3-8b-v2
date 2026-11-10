@@ -17,7 +17,9 @@ remained on GitHub/GHCR, not the laptop. One subsequently approved Runpod test
 failed at CUDA initialization (error 304), before model loading. Its Pod was
 stopped/deleted; the candidate remains launch-blocked. A model-free diagnostic
 is built, published and CPU-reviewed in CUDA-DIAGNOSTIC.md without relaxing
-child/network protections or enabling tools. Its new GPU gate remains unapproved.
+child/network protections or enabling tools. A subsequently approved allocation request failed before any Pod was observed.
+The diagnostic did not start; its GPU compatibility remains unverified, the
+guards were restored keyless, and no retry is authorized.
 
 Main remains at 442408e. PR #2 contains the prepared hardening/recovery release;
 it is not merged or deployed. Dot's initial cleanup patch was already included.

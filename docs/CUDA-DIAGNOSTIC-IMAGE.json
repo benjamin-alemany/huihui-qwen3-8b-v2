@@ -31,5 +31,12 @@
     "paid_resource_started": false,
     "runpod_cuda_validated": false,
     "agent_tools_enabled": false
+  },
+  "latest_runpod_attempt": {
+    "status": "CREATE_REQUEST_FAILED_NO_POD_OBSERVED",
+    "diagnostic_started": false,
+    "provider_reason_confirmed": false,
+    "retry_performed": false,
+    "guard_keys_removed": true
   }
 }
