@@ -1,4 +1,5 @@
 import {applyOperatorBudget} from './budget-reconcile.mjs';
+import {safePreflightFailure} from './preflight-failure.mjs';
 import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
 import {SEED,SCALE,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,ordinaryBudgetView,parseGrant,quoteMinutes,sessionMinutes,startupMinutes,receiptFresh,IMAGE,GPU,DISK_GB} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
@@ -187,7 +188,7 @@ export class SessionEngine {
     await this.d.wake(191000); // Crash recovery armed before external I/O.
     try{
       if(s.definiteNoCreate){await this.finish(s,'failed','CAPACITY_OR_PREFLIGHT_REJECTED');return;}
-      if(s.stopRequested&&!s.createAttempted){await this.finish(s,'cancelled');return;}
+      if(s.stopRequested&&!s.createAttempted){await this.finish(s,s.preflightFailed===true?'failed':'cancelled');return;}
       if(s.phase==='preflight'){
         await this.d.heartbeat();
         await update(s.id,(current,r)=>{if(r.cleanupIncidents?.some(i=>!i.resolved))throw new SessionError('RESIDUAL_RESOURCE_REVIEW_REQUIRED',503);if(current.stopRequested)return;const n=this.d.hex(32);current.nonce=n;current.inferenceKey=this.d.hex(64);if(this.d.lifecycle){current.modelKey=this.d.hex(64);if(current.modelKey===current.inferenceKey)throw new SessionError('KEY_GENERATION_FAILED',503);}current.reservation=this.lifecycle.reservation(this.d.now(),n,current.budgetKind==='ordinary'||this.d.lifecycle?sessionMinutes(current):undefined);current.phase='arming';});
@@ -268,7 +269,11 @@ export class SessionEngine {
       if(current?.id!==sessionId||current.lease!==op)return;
       s=current;
       if(s&&!s.createAttempted){
-        try{await this.finish(s,'failed',error instanceof SessionError?error.code:'PREFLIGHT_FAILED');}catch{await update(s.id,c=>{c.stopRequested=true;c.code='GUARD_DISARM_PENDING';});}
+        if(s.stopRequested&&s.preflightFailed!==true){if(error instanceof SessionError&&error.code==='GUARD_DISARM_PENDING')await update(s.id,c=>{c.code??='GUARD_DISARM_PENDING';});return;}
+        // Commit the safe reason and abort intent BEFORE disarm. A crash or
+        // failed disarm may retry cleanup, never resume arming/create.
+        await update(s.id,c=>{c.code??=safePreflightFailure(error);c.preflightFailed=true;c.stopRequested=true;});
+        try{await this.finish(s,'failed');}catch{/* The persisted reason/abort intent remains for cleanup recovery. */}
       }else if(s){
         let allocation=s.knownAllocations?.length===1?s.knownAllocations[0]:null;
         try{if(allocation)this.lifecycle.validate(allocation,s.reservation,Infinity);}catch{allocation=null;}

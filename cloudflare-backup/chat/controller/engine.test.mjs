@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SessionEngine} from './engine.mjs';
-import {SEED,IMAGE,GPU,MINUTES,catalogFrom,makeQuote,receiptFresh,parseGrant} from './session-policy.mjs';
+import {SEED,IMAGE,GPU,MINUTES,SessionError,catalogFrom,makeQuote,receiptFresh,parseGrant} from './session-policy.mjs';
 class Store {
   data=new Map();chain=Promise.resolve();
   async get(k){return structuredClone(this.data.get(k));}
@@ -66,6 +66,36 @@ test('no stock, changed price, stale guards and active unrelated resources refus
   for(const failure of [{stock:'NONE'},{price:.60},{proofFail:true},{armFail:true},{versionsFail:true},{otherPods:[{id:'unrelated'}]}]){
     const h=harness();await h.start();await h.engine().tick();h.set(failure);await h.engine().tick();assert.equal(h.creates,0);assert.equal((await h.engine().status()).session.phase,'failed');assert.equal((await h.engine().status()).testBudget.reservedUSD,0);assert.deepEqual(h.guardState,[null,null]);assert.ok(!h.calls.some(x=>x[0]==='cleanup'));
   }
+});
+test('safe pre-create failure is durable before disarm and survives cleanup retry without any create or debit',async()=>{
+ for(const [stage,error,expected] of [
+  ['preflight',Object.assign(Error('DUMMY_PRIVATE_TAIL_TRANSPORT'),{code:'TAIL_CREATE_HTTP_403'}),'TAIL_CREATE_HTTP_403'],
+  ['arming',Error('HYPERSTACK_FLAVOR_UNAVAILABLE'),'HYPERSTACK_FLAVOR_UNAVAILABLE'],
+  ['arming',new SessionError('PRICE_CHANGED'),'PRICE_CHANGED']
+ ]){
+  const h=harness(),q=await h.start(),spent=(await h.engine().status()).testBudget.spentUpperUSD;
+  if(stage==='arming')await h.engine().tick();
+  if(stage==='preflight')h.deps.heartbeat=async()=>{throw error;};else h.deps.receipts=async()=>{throw error;};
+  const disarm=h.deps.guards[0].disarm;
+  h.deps.guards[0].disarm=async()=>{const s=(await h.engine().read()).session;assert.equal(s.code,expected);assert.equal(s.preflightFailed,true);assert.equal(s.stopRequested,true);assert.equal(s.createAttempted,false);throw Error('DUMMY_PRIVATE_DISARM_FAILURE');};
+  await h.engine().tick();let status=await h.engine().status();assert.equal(status.session.code,expected);assert.equal(status.session.settledUpperUSD,null);assert.equal(status.testBudget.reservedUSD,q.maximumUSD);assert.equal(h.creates,0);assert(!JSON.stringify(status).includes('DUMMY_PRIVATE'));
+  h.deps.guards[0].disarm=disarm;await h.engine().tick();status=await h.engine().status();assert.equal(status.session.phase,'failed');assert.equal(status.session.code,expected);assert.equal(status.session.createAttempted,false);assert.equal(status.session.settledUpperUSD,0);assert.equal(status.testBudget.spentUpperUSD,spent);assert.equal(status.testBudget.reservedUSD,0);assert.equal(h.creates,0);assert.deepEqual((await h.engine().read()).ledger.usedApprovals,[]);
+ }
+});
+test('unknown preflight text and code never enter durable owner status and owner cancellation stays distinct',async()=>{
+ const h=harness();await h.start();h.deps.heartbeat=async()=>{throw Object.assign(Error('DUMMY_PRIVATE_MESSAGE'),{code:'DUMMY_PRIVATE_CONTROL_KEY',stack:'DUMMY_PRIVATE_STACK'});};await h.engine().tick();const status=await h.engine().status();assert.equal(status.session.phase,'failed');assert.equal(status.session.code,'PREFLIGHT_FAILED');assert.equal(status.session.settledUpperUSD,0);assert(!JSON.stringify(await h.engine().read()).includes('DUMMY_PRIVATE'));assert.equal(h.creates,0);
+ const stopped=harness();await stopped.start();const s=(await stopped.engine().status()).session;await stopped.engine().stop({sessionId:s.id});await stopped.engine().tick();assert.equal((await stopped.engine().status()).session.phase,'cancelled');assert.equal((await stopped.engine().status()).session.code,null);assert.equal(stopped.creates,0);
+ const delayed=harness();await delayed.start();const cancel=(await delayed.engine().status()).session;await delayed.engine().stop({sessionId:cancel.id});delayed.set({disarmFail:true});await delayed.engine().tick();assert.equal((await delayed.engine().read()).session.preflightFailed,undefined);delayed.set({disarmFail:false});await delayed.engine().tick();assert.equal((await delayed.engine().status()).session.phase,'cancelled');assert.equal((await delayed.engine().status()).session.code,'GUARD_DISARM_PENDING');assert.equal(delayed.creates,0);
+});
+test('owner Stop during a preflight await remains cancellation when that awaited operation then fails',async()=>{
+ for(const operation of ['heartbeat','receipts','catalog']){
+  const h=harness();await h.start();if(operation!=='heartbeat')await h.engine().tick();
+  let entered,reject;const waiting=new Promise(resolve=>{entered=resolve;}),failure=new Promise((resolve,refuse)=>{reject=refuse;});
+  h.deps[operation]=async()=>{entered();return failure;};const running=h.engine().tick();await waiting;
+  const before=(await h.engine().status()).session;await h.engine().stop({sessionId:before.id});reject(Object.assign(Error('DUMMY_PRIVATE_LATE_FAILURE'),{code:'TAIL_SOCKET'}));await running;
+  const pending=(await h.engine().read()).session;assert.equal(pending.stopRequested,true);assert.equal(pending.preflightFailed,undefined);assert.equal(pending.code,undefined);assert.equal(h.creates,0);
+  await h.engine().tick();const status=await h.engine().status();assert.equal(status.session.phase,'cancelled');assert.equal(status.session.code,null);assert.equal(status.session.createAttempted,false);assert.equal(status.session.settledUpperUSD,0);assert.equal(status.testBudget.reservedUSD,0);assert.equal(h.creates,0);assert(!JSON.stringify(await h.engine().read()).includes('DUMMY_PRIVATE_LATE_FAILURE'));
+ }
 });
 test('lost STOP/delete responses and guard disarm failure never report successful cleanup early',async()=>{
   const h=harness(),s=await h.ready();h.set({clean:false});await h.engine().stop({sessionId:s.id});await h.engine().tick();assert.equal((await h.engine().status()).session.phase,'stopping');assert.ok((await h.engine().status()).testBudget.reservedUSD>0);
