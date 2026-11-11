@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "unjailed-chat-v1",
-  "status": "unverified",
+  "status": "candidate",
   "model": {
     "repository": "huihui-ai/Huihui-Qwen3-8B-abliterated-v2",
     "revision": "7d89db76029281fd8f3e6698a8e30738608105a9",
@@ -9,7 +9,7 @@
   },
   "artifact": {
     "reusableOfflineBase": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:436f9088dac4df3b77e18c3dbf284bf736be85628385e187d2c41d28b43c37fa",
-    "servingImage": null,
+    "servingImage": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278",
     "runtimeProfile": "vm-inference-v1",
     "bootstrapLockSha256": "064b1db71d0511887d42d926ab2d9a4f4ce4df5ef2859a80c7cc26a712881177",
     "bootstrapBundleSha256": "8b79eb97356233a3b2be02124a7bd1224aed810fd3dcb7d7444ac8d0ded974b5",
