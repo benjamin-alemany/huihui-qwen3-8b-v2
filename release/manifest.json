@@ -13,7 +13,7 @@
     "runtimeProfile": "vm-inference-v1",
     "bootstrapLockSha256": "064b1db71d0511887d42d926ab2d9a4f4ce4df5ef2859a80c7cc26a712881177",
     "bootstrapBundleSha256": "d184d706b0116fce87987ddf253ba5f9db1ff110491d3dff5629528794f080c6",
-    "bootstrapSourceCommit": "02885a597f8deae6b9a5532f39828e09cee363db",
+    "bootstrapSourceCommit": "f9e8055422e13800f5daa65a3216c44cdd39c848",
     "bootstrapBundleSize": 58303,
     "runtimeOrchestrator": "vm-run-v1"
   },
