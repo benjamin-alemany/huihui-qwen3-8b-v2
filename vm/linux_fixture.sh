@@ -11,6 +11,9 @@ mount --make-rprivate /
 mkdir -p /run/netns
 mount -t tmpfs tmpfs /run/netns
 work=$(mktemp -d)
+mkdir -m 0755 "$work/src"
+cp vm/linux_fixture.py vm/inference_policy.py "$work/src/"
+chmod 0644 "$work/src/"*.py
 trap 'kill $(jobs -pr) 2>/dev/null || true; rm -rf "$work"' EXIT
 ip link set lo up
 ip netns add model
@@ -50,20 +53,20 @@ sysctl -q -w net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 >/dev/null
 python3 -c 'import sys;sys.path.insert(0,"vm");from host_policy import nftables;print(nftables())' > "$work/policy.nft"
 nft --check --file "$work/policy.nft"
 # Controlled endpoints prove that routes/services exist, and count DNS reaches.
-ip netns exec outside python3 -I -B vm/linux_fixture.py outside "$work" &
-ip netns exec model python3 -I -B vm/linux_fixture.py model-server "$work" &
-python3 -I -B vm/linux_fixture.py host-server "$work" &
+ip netns exec outside python3 -I -B "$work/src/linux_fixture.py" outside "$work" &
+ip netns exec model python3 -I -B "$work/src/linux_fixture.py" model-server "$work" &
+python3 -I -B "$work/src/linux_fixture.py" host-server "$work" &
 for i in $(seq 1 50); do [[ -f "$work/outside.ready" && -f "$work/model.ready" && -f "$work/host.ready" ]] && break; sleep .1; done
 test -f "$work/outside.ready"; test -f "$work/model.ready"; test -f "$work/host.ready"
-ip netns exec model setpriv --reuid 10001 --regid 10001 --clear-groups python3 -I -B vm/linux_fixture.py baseline "$work"
+ip netns exec model setpriv --reuid 10001 --regid 10001 --clear-groups python3 -I -B "$work/src/linux_fixture.py" baseline "$work"
 : > "$work/dns.received"
 : > "$work/host-dns.received"
 nft --file "$work/policy.nft"
-setpriv --reuid 10002 --regid 10002 --clear-groups python3 -I -B vm/linux_fixture.py positive "$work"
+setpriv --reuid 10002 --regid 10002 --clear-groups python3 -I -B "$work/src/linux_fixture.py" positive "$work"
 # This test intentionally has NO child seccomp policy. Host nft must block it.
-ip netns exec model setpriv --reuid 10001 --regid 10001 --clear-groups --no-new-privs --bounding-set=-all python3 -I -B vm/linux_fixture.py hostile "$work"
+ip netns exec model setpriv --reuid 10001 --regid 10001 --clear-groups --no-new-privs --bounding-set=-all python3 -I -B "$work/src/linux_fixture.py" hostile "$work"
 # Policy is tested independently, after host denial; namespace failure is fatal.
-ip netns exec model setpriv --reuid 10001 --regid 10001 --clear-groups --no-new-privs --bounding-set=-all python3 -I -B vm/linux_fixture.py child-policy "$work"
+ip netns exec model setpriv --reuid 10001 --regid 10001 --clear-groups --no-new-privs --bounding-set=-all python3 -I -B "$work/src/linux_fixture.py" child-policy "$work"
 nft list chain inet unjailed forward | grep -Eq 'counter packets [1-9][0-9]*'
-python3 -I -B vm/linux_fixture.py check-counters "$work"
+python3 -I -B "$work/src/linux_fixture.py" check-counters "$work"
 printf '%s\n' 'LINUX_CPU_HOST_EGRESS_PRIVATE_IPC_FIXTURE_PASSED_NOT_VM_OR_GPU_ACCEPTANCE'
