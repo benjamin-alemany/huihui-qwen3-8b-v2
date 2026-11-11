@@ -5,9 +5,9 @@ It is a pinned `candidate`, not an accepted production release. The serving imag
 bootstrap package lock, bundle digest, compressed size, source commit and runtime
 orchestrator are pinned. The exact image passed free published-artifact checks
 for copied code, offline cache and runtime imports; native acceptance is pending.
-The one-allocation acceptance stopped at provider reservation identity readback,
+An earlier recorded acceptance stopped at provider reservation identity readback,
 before model permission. The source acceptance pin is limited to the exact separately owner-approved candidate; production approval remains closed. No native
-CUDA/model result is established by that attempt. Account catalog IDs and
+CUDA/model result is established by that historical attempt. Account catalog IDs and
 passing CPU tests do not prove driver, toolkit, container or model compatibility.
 
 Use the reviewed GitHub branch for code. Keep account environment/key names,
@@ -33,6 +33,14 @@ migration rather than silently reassigned to another provider client.
 Free runtime boundary evidence: [CPU run 42939042999](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42939042999).
 Exact published-artifact verification: [run 42942763420](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42942763420).
 Neither run loaded Qwen or validated the target GPU.
+
+Subsequent reviewed source fixes refresh owner controller state before quoting,
+preserve safe preflight/cancellation reasons through cleanup, canonicalize the
+exact authenticated Cloudflare logout return, and retain only whitelisted
+create-failure metadata. Latest free coverage passed 306 Node, 26 chat Worker,
+17 controller Durable Object and 20 guard Durable Object checks. Neither these
+CPU checks nor published-artifact verification establish native target-provider
+acceptance or production promotion.
 
 ## Ownership compatibility
 
