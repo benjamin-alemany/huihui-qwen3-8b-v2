@@ -1,5 +1,6 @@
 import release from '../../../release/manifest.json' with {type:'json'};
 import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
+import {safeCreateDiagnostics} from '../hyperstack/client.mjs';
 export const IMAGE=release.legacyValidation.image;
 export const GPU=release.legacyValidation.gpu,MINUTES=release.legacyValidation.minutes,DISK_GB=release.legacyValidation.diskGB;
 export const DEFAULT_MINUTES=release.sessions.defaultMinutes,SESSION_MINUTES=Object.freeze([...release.sessions.allowedMinutes]),MAX_GRANT_USD=10;
@@ -58,7 +59,7 @@ function diagnosticView(s){
 export function safeSession(s){
   if(!s)return null;
   return {id:s.id,quoteId:s.quoteId,minutes:sessionMinutes(s),phase:s.phase,code:s.code??null,stopRequested:!!s.stopRequested,createdAt:s.pod?.createdAt??null,deadline:s.deadline?new Date(s.deadline).toISOString():null,
-    maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted,diagnostics:diagnosticView(s),...(s.guardProof?{guardProof:structuredClone(s.guardProof)}:{})};
+    maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted,createDiagnostics:safeCreateDiagnostics(s.createDiagnostics),diagnostics:diagnosticView(s),...(s.guardProof?{guardProof:structuredClone(s.guardProof)}:{})};
 }
 export function budgetView(l,originalAcceptance=ORIGINAL_ACCEPTANCE){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),originalAcceptance:originalAcceptance===null?null:parseOriginalAcceptance(JSON.stringify(originalAcceptance))};}
 export function ordinaryBudgetView(l){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),grantCount:l.grantCount};}

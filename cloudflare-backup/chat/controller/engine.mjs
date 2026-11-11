@@ -1,5 +1,6 @@
 import {applyOperatorBudget} from './budget-reconcile.mjs';
 import {safePreflightFailure} from './preflight-failure.mjs';
+import {safeCreateDiagnostics} from '../hyperstack/client.mjs';
 import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
 import {SEED,SCALE,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,ordinaryBudgetView,parseGrant,quoteMinutes,sessionMinutes,startupMinutes,receiptFresh,IMAGE,GPU,DISK_GB} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
@@ -217,6 +218,8 @@ export class SessionEngine {
           // Persisted createAttempted BEFORE the only create. An exception or
           // process death leaves reconciling, never a reason to resend create.
           try{const created=await this.d.provider.create(body);if(created&&this.d.lifecycle)await this.rememberPods(s,[created]);}catch(error){
+            const diagnostics=this.lifecycle.provider==='hyperstack'?safeCreateDiagnostics(error?.diagnostics):null;
+            if(diagnostics)await update(s.id,c=>{c.createDiagnostics=diagnostics;});
             if(this.d.lifecycle&&error?.outcome==='definite-no-create'){await update(s.id,c=>{c.definiteNoCreate=true;});await this.finish({...s,createAttempted:true,definiteNoCreate:true},'failed','CAPACITY_OR_PREFLIGHT_REJECTED');}
             // Unknown replies remain reconciling; never resend create.
           }

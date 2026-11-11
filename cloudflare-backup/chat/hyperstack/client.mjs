@@ -18,18 +18,28 @@ function securityRules(raw){
 }
 function exactRules(rules){return rules.length===SEALED_RULES.length&&rules.every(r=>r.status==='SUCCESS')&&new Set(rules.map(ruleKey)).size===SEALED_RULES.length&&SEALED_RULES.every(wanted=>rules.some(r=>ruleKey(r)===ruleKey(wanted)));}
 
+const RESPONSE_LIMIT=2*1024*1024;
+const CREATE_REASONS=new Set(['bad_request','compatibility_blocked']);
+export function safeCreateDiagnostics(value){
+  if(!value||value.version!==1||value.provider!=='hyperstack'||!Number.isInteger(value.httpStatus)||value.httpStatus<100||value.httpStatus>599||!(value.responseBytes===null||Number.isSafeInteger(value.responseBytes)&&value.responseBytes>=0&&value.responseBytes<=RESPONSE_LIMIT))return null;
+  const errorReason=value.errorReason===null?null:CREATE_REASONS.has(value.errorReason)?value.errorReason:'redacted';
+  return {version:1,provider:'hyperstack',httpStatus:value.httpStatus,errorReason,responseBytes:value.responseBytes};
+}
+const responseDiagnostics=(httpStatus,data,responseBytes)=>safeCreateDiagnostics({version:1,provider:'hyperstack',httpStatus,errorReason:data?.error_reason??null,responseBytes});
 export class CreateError extends Error{
-  constructor(code,outcome='unknown'){super(code);this.name='CreateError';this.code=code;this.outcome=outcome;}
+  constructor(code,outcome='unknown',diagnostics){super(code);this.name='CreateError';this.code=code;this.outcome=outcome;if(diagnostics)this.diagnostics=safeCreateDiagnostics(diagnostics);}
 }
 // No generic request/URL passthrough is exposed. The API key never appears in
 // VM user_data, normalized readbacks, errors, or inference requests.
 export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl=fetch,now=Date.now}={}){
   if(typeof key!=='string'||key.length<16||/[\r\n]/.test(key))fail('HYPERSTACK_NOT_CONFIGURED');
   const t=validateTarget(target),attempted=new Set();
-  async function request(path,{method='GET',body}={}){
+  async function request(path,{method='GET',body,captureCreateFailure=false}={}){
     let response;try{response=await fetchImpl(API_BASE+path,{method,headers:{api_key:key,Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'manual',signal:AbortSignal.timeout(25_000)});}catch{fail('HYPERSTACK_REQUEST_UNCONFIRMED');}
-    let data;try{data=await boundedJSON(response.body,2*1024*1024);}catch{fail('HYPERSTACK_RESPONSE_INVALID');}
-    return {status:response.status,data};
+    let bytes=0;
+    const stream=captureCreateFailure&&response.body?response.body.pipeThrough(new TransformStream({transform(chunk,controller){bytes=Math.min(RESPONSE_LIMIT+1,bytes+chunk.byteLength);controller.enqueue(chunk);}})):response.body;
+    let data;try{data=await boundedJSON(stream,RESPONSE_LIMIT);}catch{if(captureCreateFailure)throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED','unknown',responseDiagnostics(response.status,null,bytes<=RESPONSE_LIMIT?bytes:null));fail('HYPERSTACK_RESPONSE_INVALID');}
+    return {status:response.status,data,...(captureCreateFailure?{diagnostics:responseDiagnostics(response.status,data,bytes<=RESPONSE_LIMIT?bytes:null)}:{})};
   }
   async function read(path){const r=await request(path);if(r.status!==200)fail('HYPERSTACK_REQUEST_UNCONFIRMED');return r.data;}
   async function paged(path,field,beforePage){
@@ -149,10 +159,10 @@ export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl
       }catch(e){if(e instanceof CreateError)throw e;throw new CreateError('HYPERSTACK_CREATE_PREFLIGHT_REJECTED','definite-no-create');}
       // Caller MUST first durably consume its nonce/createAttempted flag and
       // arm both guards. This local set adds protection, not restart durability.
-      let r;try{r=await request('/core/virtual-machines',{method:'POST',body:{count:1,environment_name:t.environmentName,flavor_name:t.flavorName,image_id:t.imageId,key_name:t.keyName,name:q.name,user_data:userData,assign_floating_ip:true,enable_port_randomization:false,create_bootable_volume:false,security_rules:[],...(q.ownershipPolicy===NONCE_NAME_OWNERSHIP?{}:{labels:[`unjailed:${q.nonce}`]})}});}catch{throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');}
-      if(r.status===400&&r.data?.status===false&&r.data.error_reason==='compatibility_blocked'&&r.data.compatibility_status==='BLOCKED')throw new CreateError('HYPERSTACK_IMAGE_INCOMPATIBLE','definite-no-create');
-      if(r.status!==200||r.data?.status!==true||!Array.isArray(r.data.instances)||r.data.instances.length!==1)throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');
-      let p;try{p=normalizeVM(r.data.instances[0]);if(!matchesReservation(p,q))fail('HYPERSTACK_CREATE_IDENTITY_MISMATCH');}catch{throw new CreateError('HYPERSTACK_CREATE_READBACK_UNCONFIRMED');}
+      let r;try{r=await request('/core/virtual-machines',{method:'POST',captureCreateFailure:true,body:{count:1,environment_name:t.environmentName,flavor_name:t.flavorName,image_id:t.imageId,key_name:t.keyName,name:q.name,user_data:userData,assign_floating_ip:true,enable_port_randomization:false,create_bootable_volume:false,security_rules:[],...(q.ownershipPolicy===NONCE_NAME_OWNERSHIP?{}:{labels:[`unjailed:${q.nonce}`]})}});}catch(error){if(error instanceof CreateError)throw error;throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');}
+      if(r.status===400&&r.data?.status===false&&r.data.error_reason==='compatibility_blocked'&&r.data.compatibility_status==='BLOCKED')throw new CreateError('HYPERSTACK_IMAGE_INCOMPATIBLE','definite-no-create',r.diagnostics);
+      if(r.status!==200||r.data?.status!==true||!Array.isArray(r.data.instances)||r.data.instances.length!==1)throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED','unknown',r.diagnostics);
+      let p;try{p=normalizeVM(r.data.instances[0]);if(!matchesReservation(p,q))fail('HYPERSTACK_CREATE_IDENTITY_MISMATCH');}catch{throw new CreateError('HYPERSTACK_CREATE_READBACK_UNCONFIRMED','unknown',r.diagnostics);}
       return p;
     },
     async health(allocation,inferenceKey){

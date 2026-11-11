@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SessionEngine} from './engine.mjs';
+import {CreateError} from '../hyperstack/client.mjs';
 import {SEED,IMAGE,GPU,MINUTES,SessionError,catalogFrom,makeQuote,receiptFresh,parseGrant} from './session-policy.mjs';
 class Store {
   data=new Map();chain=Promise.resolve();
@@ -56,6 +57,20 @@ test('unknown create result holds budget and reconciles without blind retry',asy
   const h=harness();h.set({createError:true});await h.start();await h.engine().tick();await h.engine().tick();const reserved=(await h.engine().status()).testBudget.reservedUSD;
   h.advance(301000);await h.engine().tick();const status=await h.engine().status();assert.equal(status.session.phase,'attention');assert.equal(status.testBudget.reservedUSD,reserved);assert.equal(h.creates,1);
   await h.engine().tick();assert.equal(h.creates,1);assert.equal((await h.engine().status()).session.phase,'attention');
+});
+test('create HTTP metadata commits before outcome handling, stays sanitized and never permits an unknown-result retry',async()=>{
+ for(const outcome of ['unknown','definite-no-create']){
+  const h=harness();let calls=0;
+  // Use the existing lifecycle without changing its validation or cleanup rules.
+  h.deps.lifecycle={...h.engine().lifecycle,provider:'hyperstack'};
+  const metadata={version:1,provider:'hyperstack',httpStatus:400,errorReason:outcome==='unknown'?'bad_request':'compatibility_blocked',responseBytes:143};
+  h.provider.create=async()=>{calls++;const error=new CreateError(outcome==='unknown'?'HYPERSTACK_CREATE_UNCONFIRMED':'HYPERSTACK_IMAGE_INCOMPATIBLE',outcome,metadata);error.diagnostics.raw='DUMMY_PRIVATE_BODY';throw error;};
+  const disarm=h.deps.guards[0].disarm;h.deps.guards[0].disarm=async(...args)=>{const s=(await h.engine().read()).session;assert.deepEqual(s.createDiagnostics,metadata);return disarm(...args);};
+  const q=await h.start();await h.engine().tick();await h.engine().tick();let status=await h.engine().status();assert.deepEqual(status.session.createDiagnostics,metadata);assert(!JSON.stringify(status).includes('DUMMY_PRIVATE'));assert.equal(status.session.createAttempted,true);
+  if(outcome==='unknown'){assert.equal(status.session.phase,'reconciling');assert.equal(status.session.settledUpperUSD,null);assert.equal(status.testBudget.reservedUSD,q.maximumUSD);h.advance(301000);await h.engine().tick();status=await h.engine().status();assert.equal(status.session.phase,'attention');assert.equal(status.testBudget.reservedUSD,q.maximumUSD);}
+  else {assert.equal(status.session.phase,'failed');assert.equal(status.session.settledUpperUSD,0);assert.equal(status.testBudget.reservedUSD,0);}
+  assert.equal(calls,1);assert(!JSON.stringify(await h.engine().read()).includes('DUMMY_PRIVATE'));
+ }
 });
 test('a delayed successful create is adopted and immediately cleaned after owner cancellation',async()=>{
   const h=harness();h.set({createError:true});await h.start();await h.engine().tick();await h.engine().tick();const s=(await h.engine().read()).session;

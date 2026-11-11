@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {hyperstackClient,CreateError} from './client.mjs';
+import {hyperstackClient,CreateError,safeCreateDiagnostics} from './client.mjs';
 import {validateCatalog,normalizeVM,matchesReservation,assertBound} from './policy.mjs';
 import {NOW,TARGET,RESERVATION,rawVM,catalogRaw,fixture} from './fixtures.mjs';
 const KEY='DUMMY_PROVIDER_KEY_NOT_A_REAL_SECRET';
@@ -38,6 +38,21 @@ test('slow bootstrap cannot send a POST after the creation window or deadline ex
 });
 test('unknown create outcomes retain ambiguity; documented compatibility rejection is definite',async()=>{
  for(const mode of ['lost','ambiguous','blocked']){const s=fixture({createMode:mode});await assert.rejects(client(s).create(RESERVATION),e=>e.outcome===(mode==='blocked'?'definite-no-create':'unknown')&&!e.message.includes('DUMMY_SECRET'));assert.equal(s.calls.filter(x=>x.method==='POST').length,1);if(mode==='lost')assert.equal(s.vms.length,1);}
+});
+test('create failures keep only bounded HTTP status, known reason and actual response bytes without changing ambiguity',async()=>{
+ for(const [status,data,outcome,reason] of [[400,{status:false,error_reason:'bad_request',message:'DUMMY_PRIVATE_RESPONSE'},'unknown','bad_request'],[400,{status:false,error_reason:'compatibility_blocked',compatibility_status:'BLOCKED',user_data:'DUMMY_PRIVATE_BOOTSTRAP'},'definite-no-create','compatibility_blocked'],[400,{status:false,error_reason:'DUMMY_PRIVATE_REASON',message:KEY,headers:{api_key:KEY}},'unknown','redacted'],[503,{status:false,error_reason:'bad_request'},'unknown','bad_request']]){
+  const text=' \n'+JSON.stringify(data)+'\n',s=fixture(),c=client(s,{fetchImpl:async(url,options)=>{assert.equal(options.method,'POST');return new Response(text,{status,headers:{'DUMMY-Private-Header':KEY}});}});
+  await assert.rejects(c.create(RESERVATION),error=>{assert.equal(error.outcome,outcome);assert.deepEqual(error.diagnostics,{version:1,provider:'hyperstack',httpStatus:status,errorReason:reason,responseBytes:new TextEncoder().encode(text).byteLength});assert(!JSON.stringify(error).includes('DUMMY_PRIVATE'));assert(!JSON.stringify(error).includes(KEY));return true;});
+ }
+});
+test('malformed, oversized and lost create replies retain safe diagnostics or no response evidence, never definite absence',async()=>{
+ for(const text of ['DUMMY_PRIVATE_NON_JSON','x'.repeat(2*1024*1024+1)]){const s=fixture(),c=client(s,{fetchImpl:async()=>new Response(text,{status:400})});await assert.rejects(c.create(RESERVATION),error=>{assert.equal(error.outcome,'unknown');assert.deepEqual(error.diagnostics,{version:1,provider:'hyperstack',httpStatus:400,errorReason:null,responseBytes:text.length>2*1024*1024?null:new TextEncoder().encode(text).byteLength});assert(!JSON.stringify(error).includes('DUMMY_PRIVATE'));return true;});}
+ const lost=client(fixture({createMode:'lost'}));await assert.rejects(lost.create(RESERVATION),error=>error.outcome==='unknown'&&error.diagnostics===undefined);
+});
+test('owner create diagnostic projection rejects invalid bounds and strips every unreviewed field',()=>{
+ const sample={version:1,provider:'hyperstack',httpStatus:400,errorReason:'DUMMY_PRIVATE_REASON',responseBytes:143,raw:'DUMMY_PRIVATE_BODY',headers:{api_key:KEY},user_data:KEY};
+ assert.deepEqual(safeCreateDiagnostics(sample),{version:1,provider:'hyperstack',httpStatus:400,errorReason:'redacted',responseBytes:143});
+ for(const patch of [{httpStatus:0},{httpStatus:600},{responseBytes:-1},{responseBytes:2*1024*1024+1},{provider:'other'},{version:2}])assert.equal(safeCreateDiagnostics({...sample,...patch}),null);
 });
 test('only structured 404 proves absence, auth failure and malformed successful replies never do',async()=>{
  const s=fixture(),c=client(s);assert.equal(await c.get('44'),null);s.getStatus=401;await assert.rejects(c.get('44'));s.getStatus=500;await assert.rejects(c.get('44'));
