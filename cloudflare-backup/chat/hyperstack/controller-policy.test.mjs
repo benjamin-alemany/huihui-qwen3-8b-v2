@@ -12,8 +12,9 @@ function session(l=lifecycle()){
  return {phase:'ready',quote,reservation,bootAt:NOW,deadline:reservation.deadline,nonce:reservation.nonce,inferenceKey:'c'.repeat(64),pod:normalizeVM(rawVM())};
 }
 function proof(q){return {schedulerReady:true,provider:'hyperstack',reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,guards:Object.fromEntries(['primary','backup'].map(role=>[role,{role,mode:'reservation',nonce:q.nonce,expiry:q.deadline+(role==='backup'?60_000:0),eventTimestamp:NOW,version:'11111111-1111-4111-8111-111111111111'}]))};}
-test('unverified/null source manifest cannot construct an enabled provider lifecycle',()=>{
- assert.throws(()=>hyperstackLifecycle({target:TARGET,release}),/HYPERSTACK_RELEASE_UNPINNED/);assert.equal(lifecycle().provider,'hyperstack');assert.equal(hyperstackLifecycle({target:TARGET,release:pinned('verified')}).provider,'hyperstack');
+test('otherwise-pinned candidates reject unverified status and missing serving artifact independently',()=>{
+ const valid=pinned();assert.equal(hyperstackLifecycle({target:TARGET,release:valid}).provider,'hyperstack');assert.equal(hyperstackLifecycle({target:TARGET,release:pinned('verified')}).provider,'hyperstack');
+ for(const mutate of [r=>{r.status='unverified';},r=>{r.artifact.servingImage=null;}]){const invalid=structuredClone(valid);mutate(invalid);assert.throws(()=>hyperstackLifecycle({target:TARGET,release:invalid}),/HYPERSTACK_RELEASE_UNPINNED/);}
  for(const mutate of [r=>{r.artifact.servingImage='image:latest';},r=>{r.artifact.bootstrapLockSha256=null;},r=>{r.hosting.vmImageId=99;},r=>{r.hosting.driverBranch=595;},r=>{r.model.revision='0'.repeat(40);},r=>{r.inference.origin='https://attacker.invalid';}]){const r=pinned();mutate(r);assert.throws(()=>hyperstackLifecycle({target:TARGET,release:r}));}
 });
 test('release and target cannot be changed after policy construction',()=>{

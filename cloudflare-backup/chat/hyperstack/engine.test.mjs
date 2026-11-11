@@ -32,7 +32,11 @@ function harness(){
  const engine=()=>new SessionEngine(store,deps);
  return {store,provider,deps,flags,rows,calls,guards,engine,get now(){return now;},advance:ms=>{now+=ms;},get creates(){return calls.filter(c=>c[0]==='create').length;},async grant(){return engine().grant({grantId:'00000000-0000-4000-8000-000000000001',amountUSD:2});},async start(minutes){const q=await engine().quote(minutes===undefined?undefined:{minutes});await engine().start({quoteId:q.id,maximumUSD:q.maximumUSD});return q;},async ready(minutes){await this.start(minutes);await engine().tick();await engine().tick();await engine().tick();return (await engine().status()).session;}};
 }
-test('source manifest with missing serving artifact cannot choose the new provider',()=>{assert.throws(()=>hyperstackLifecycle({target:TARGET,release}),/HYPERSTACK_RELEASE_UNPINNED/);});
+test('otherwise-pinned candidate with a missing serving artifact cannot choose the new provider',()=>{
+ const valid=pinned();assert.equal(hyperstackLifecycle({target:TARGET,release:valid}).provider,'hyperstack');
+ const missing=structuredClone(valid);missing.artifact.servingImage=null;
+ assert.throws(()=>hyperstackLifecycle({target:TARGET,release:missing}),/HYPERSTACK_RELEASE_UNPINNED/);
+});
 test('injected Hyperstack lifecycle completes explicit repeat sessions without touching historical budget',async()=>{
  const h=harness();await h.grant();const original=structuredClone((await h.engine().read()).ledger);const ids=[];
  for(const minutes of [15,30,60]){

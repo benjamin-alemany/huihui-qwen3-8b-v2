@@ -23,10 +23,12 @@ test('factory construction is side-effect free and flags/callbacks cannot replac
 });
 test('malformed target, key and release never fall back to Runpod or send any request',async()=>{
  const {store,r}=prepared();let calls=0;const fetchImpl=async()=>{calls++;throw Error('No HTTP');};
+ const control=hyperstackControllerFactory({env:environment(),storage:store,release:r,fetchImpl});assert.equal(control.connected,true);assert.equal(control.readiness.releasePinned,true);assert(!control.readiness.blockers.includes('HYPERSTACK_RELEASE_UNPINNED'));
  for(const patch of [{HYPERSTACK_TARGET_JSON:'{}'},{HYPERSTACK_API_KEY:'BAD\nKEY'},{HYPERSTACK_TARGET_JSON:'not JSON'}]){
   const f=hyperstackControllerFactory({env:{...environment(),RUNPOD_API_KEY:'DUMMY_RUNPOD_KEY',...patch},storage:store,release:r,fetchImpl});assert.equal(f.connected,false);assert.equal(f.enabled,false);assert.equal(f.lifecycle.provider,'hyperstack');await assert.rejects(f.provider.create({}));
  }
- const f=hyperstackControllerFactory({env:environment(),storage:store,release:manifest,fetchImpl});assert.equal(f.connected,false);assert(f.readiness.blockers.includes('HYPERSTACK_RELEASE_UNPINNED'));await assert.rejects(f.catalog());assert.equal(calls,0);
+ const missing=structuredClone(r);missing.artifact.servingImage=null;
+ const f=hyperstackControllerFactory({env:environment(),storage:store,release:missing,fetchImpl});assert.equal(f.connected,false);assert(f.readiness.blockers.includes('HYPERSTACK_RELEASE_UNPINNED'));await assert.rejects(f.catalog());assert.equal(calls,0);
 });
 test('missing budget, bundle, runtime orchestrator and tunnel credentials are independent blockers',()=>{
  const {store,r}=prepared(),env=environment();delete env.OPERATOR_BUDGET_RECONCILIATION;delete env.HYPERSTACK_HOST_TUNNEL_CREDENTIAL_JSON;
