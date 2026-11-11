@@ -17,7 +17,7 @@ def server_udp(logname='dns.received'):
   s.sendto(b'DUMMY',address)
 def start(fn,*args):threading.Thread(target=fn,args=args,daemon=True).start()
 def tcp(address,port,family=socket.AF_INET):
- with socket.socket(family,socket.SOCK_STREAM) as s:s.settimeout(.3);s.connect((address,port));return s.recv(5)
+ with socket.socket(family,socket.SOCK_STREAM) as s:s.settimeout(2 if mode in ['baseline','positive'] else .3);s.connect((address,port));return s.recv(5)
 def denied(fn):
  try:fn()
  except OSError:return

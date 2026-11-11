@@ -1,7 +1,7 @@
 #!/bin/bash
 # Standard disposable Linux CPU runner only. No package installation, image pull,
 # credentials, model, GPU or provider API here. Root must approve CI invocation.
-set -euo pipefail
+set -Eeuo pipefail
 if [[ "${1:-}" != --inside ]]; then
   test "$(id -u)" = 0
   exec env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin unshare --mount --net --pid --fork --mount-proc /bin/bash "$0" --inside
@@ -19,6 +19,8 @@ ip link set lo up
 ip netns add model
 ip netns add outside
 ip link add uj-m-host type veth peer name uj-model
+ip link set uj-m-host address 02:00:00:00:01:01
+ip link set uj-model address 02:00:00:00:01:02
 ip link set uj-model netns model
 ip addr add 10.203.0.1/24 dev uj-m-host
 ip -6 addr add fd42:203::1/64 nodad dev uj-m-host
@@ -28,6 +30,8 @@ ip -n model addr add 10.203.0.2/24 dev uj-model
 ip -n model -6 addr add fd42:203::2/64 nodad dev uj-model
 ip -n model link set uj-model up
 ip link add fixture-wan type veth peer name fixture-outside
+ip link set fixture-wan address 02:00:00:00:02:01
+ip link set fixture-outside address 02:00:00:00:02:02
 ip link set fixture-outside netns outside
 ip addr add 172.30.0.1/24 dev fixture-wan
 ip -6 addr add fd42:99::1/64 nodad dev fixture-wan
@@ -50,6 +54,21 @@ ip -n model -6 route add default via fd42:203::1
 ip -n outside route add 10.203.0.0/24 via 172.30.0.1
 ip -n outside -6 route add fd42:203::/64 via fd42:99::1
 sysctl -q -w net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 >/dev/null
+# Permanent neighbors make IPv6 data-path controls independent of NDP timing.
+# These MACs exist only inside this disposable, disconnected fixture.
+ip -6 neigh replace fd42:203::2 lladdr 02:00:00:00:01:02 nud permanent dev uj-m-host
+ip -6 neigh replace fd42:99::2 lladdr 02:00:00:00:02:02 nud permanent dev fixture-wan
+ip -n model -6 neigh replace fd42:203::1 lladdr 02:00:00:00:01:01 nud permanent dev uj-model
+ip -n outside -6 neigh replace fd42:99::1 lladdr 02:00:00:00:02:01 nud permanent dev fixture-outside
+on_error() {
+  ip -6 address show
+  ip -6 route show
+  ip -n model -6 route show
+  ip -n outside -6 route show
+  ip -n model -6 neigh show
+  ip netns exec outside ss -lnt
+}
+trap on_error ERR
 python3 -c 'import sys;sys.path.insert(0,"vm");from host_policy import nftables;print(nftables())' > "$work/policy.nft"
 nft --check --file "$work/policy.nft"
 # Controlled endpoints prove that routes/services exist, and count DNS reaches.
