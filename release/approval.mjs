@@ -1,19 +1,9 @@
 import manifest from './manifest.json' with {type:'json'};
 // Source review gates, not deployment flags, browser grants or model receipts.
-// Exact candidate approved for one separately authorized acceptance allocation.
-// Runtime flags, durable one-use authorization and budget holds remain required.
-// The production pin remains null until native/browser/cleanup acceptance passes.
-export const APPROVED_ACCEPTANCE_RELEASE=Object.freeze({
-  "releaseId": "unjailed-chat-v1",
-  "servingImage": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278",
-  "bootstrapLockSha256": "064b1db71d0511887d42d926ab2d9a4f4ce4df5ef2859a80c7cc26a712881177",
-  "bootstrapBundleSha256": "8b79eb97356233a3b2be02124a7bd1224aed810fd3dcb7d7444ac8d0ded974b5",
-  "bootstrapSourceCommit": "02885a597f8deae6b9a5532f39828e09cee363db",
-  "bootstrapBundleSize": 56684,
-  "runtimeOrchestrator": "vm-run-v1",
-  "runtimeProfile": "vm-inference-v1",
-  "vmImageId": 574
-});
+// The single approved allocation ended at the provider identity readback gate.
+// Both pins are closed; another native allocation requires a new reviewed
+// authorization. No model, runtime or isolation acceptance is implied.
+export const APPROVED_ACCEPTANCE_RELEASE=null;
 export const ACCEPTED_PRODUCTION_RELEASE=null;
 export function matchesReleasePin(release,pin){
  return !!(pin&&release&&release.schemaVersion===1&&['candidate','verified'].includes(release.status)&&
