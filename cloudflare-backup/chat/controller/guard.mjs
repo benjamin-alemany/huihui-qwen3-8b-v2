@@ -135,7 +135,7 @@ export default {
     if(env.HOSTING_PROVIDER==='hyperstack'){
       const waiting=result.status==='ARMED'&&report.armed&&report.bindings.length===0&&report.stopRequested===false;
       console.log(JSON.stringify({event:'guard_tick',provider:'hyperstack',role:env.CHAT_STOP_ROLE,
-        ...(report.armed?{name:report.name,reservationName:report.name,image:report.image,nonce:report.nonce,deadline:report.deadline,expiry:report.expiry}:{}),
+        ...(report.armed?{...(report.ownershipPolicy!==undefined?{ownershipPolicy:report.ownershipPolicy}:{}),name:report.name,reservationName:report.name,image:report.image,nonce:report.nonce,deadline:report.deadline,expiry:report.expiry}:{}),
         status:waiting?'waiting-for-reserved-vm':result.status,at:new Date().toISOString()}));
       return;
     }

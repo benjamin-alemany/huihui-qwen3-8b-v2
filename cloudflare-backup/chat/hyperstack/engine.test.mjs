@@ -10,7 +10,7 @@ const pinned=()=>({...structuredClone(release),status:'candidate',artifact:{...r
 class EngineStore extends Store{async setAlarm(at){await this.put('$alarm',at);}}
 function harness(){
  let now=NOW,sequence=0,vmSequence=100;
- const store=new EngineStore(),flags={health:true,cleanup:true,create:'ok',receiptExpiry:false,armingDelay:0},rows=[],calls=[],guards=[null,null];
+ const store=new EngineStore(),flags={health:true,cleanup:true,create:'ok',receiptExpiry:false,armingDelay:0,emptyLabels:false},rows=[],calls=[],guards=[null,null];
  const lifecycle=hyperstackLifecycle({target:TARGET,release:pinned()});
  const provider={
   catalog:async()=>validateCatalog(catalogRaw(),TARGET,now),list:async()=>structuredClone(rows),get:async id=>structuredClone(rows.find(p=>p.id===id)??null),
@@ -20,14 +20,14 @@ function harness(){
    assert(!JSON.stringify(q).includes(current.inferenceKey));assert(!JSON.stringify(q).includes('DUMMY_PROVIDER_KEY'));
    if(flags.create==='definite')throw new CreateError('DUMMY_PREFLIGHT_REJECTED','definite-no-create');
    if(flags.create==='unknown')throw new CreateError('DUMMY_LOST_REPLY');
-   const p=normalizeVM(rawVM({id:++vmSequence,name:q.name,labels:[`unjailed:${q.nonce}`],created_at:new Date(now).toISOString()}));rows.push(p);return structuredClone(p);
+   const p=normalizeVM(rawVM({id:++vmSequence,name:q.name,labels:flags.emptyLabels?[]:[`unjailed:${q.nonce}`],created_at:new Date(now).toISOString()}));rows.push(p);return structuredClone(p);
   },
   health:async()=>flags.health,
   cleanup:async p=>{calls.push(['cleanup',p.id]);const index=rows.findIndex(x=>x.id===p.id);if(flags.cleanup&&index>=0)rows.splice(index,1);return absenceReceipt({complete:flags.cleanup,vmAbsent:flags.cleanup,inventoryAbsent:flags.cleanup});}
  };
  const deps={lifecycle,now:()=>now,id:()=>`dummy-${++sequence}`,hex:n=>(++sequence).toString(16).padStart(n,'0'),enabled:true,connected:true,validationMode:false,approval:'dummy-one-test',maxUSD:.4,maxHourly:1,key:'DUMMY_PROVIDER_KEY_ONLY_GUARDS',provider,catalog:provider.catalog,wake:async()=>{},heartbeat:async()=>{},
   guards:[0,1].map(i=>({arm:async(q,key)=>{assert.equal(key,'DUMMY_PROVIDER_KEY_ONLY_GUARDS');guards[i]=structuredClone(q);},shorten:async(name,at)=>{calls.push(['shorten',i,name,at]);},disarm:async(name,options)=>{calls.push(['disarm',i,name,options]);guards[i]=null;},report:async()=>({armed:!!guards[i],name:guards[i]?.name,deleted:[]})})),
-  receipts:async q=>{now+=flags.armingDelay;return {schedulerReady:true,provider:'hyperstack',reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,guards:Object.fromEntries(['primary','backup'].map(role=>[role,{role,mode:'reservation',nonce:q.nonce,expiry:q.deadline+(role==='backup'?60000:0)+(flags.receiptExpiry?1:0),eventTimestamp:now,version:'11111111-1111-4111-8111-111111111111'}]))};},checkVersions:async()=>{}
+  receipts:async q=>{now+=flags.armingDelay;return {schedulerReady:true,provider:'hyperstack',...(q.ownershipPolicy!==undefined?{ownershipPolicy:q.ownershipPolicy}:{}),reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,guards:Object.fromEntries(['primary','backup'].map(role=>[role,{role,mode:'reservation',...(q.ownershipPolicy!==undefined?{ownershipPolicy:q.ownershipPolicy}:{}),nonce:q.nonce,expiry:q.deadline+(role==='backup'?60000:0)+(flags.receiptExpiry?1:0),eventTimestamp:now,version:'11111111-1111-4111-8111-111111111111'}]))};},checkVersions:async()=>{}
  };
  const engine=()=>new SessionEngine(store,deps);
  return {store,provider,deps,flags,rows,calls,guards,engine,get now(){return now;},advance:ms=>{now+=ms;},get creates(){return calls.filter(c=>c[0]==='create').length;},async grant(){return engine().grant({grantId:'00000000-0000-4000-8000-000000000001',amountUSD:2});},async start(minutes){const q=await engine().quote(minutes===undefined?undefined:{minutes});await engine().start({quoteId:q.id,maximumUSD:q.maximumUSD});return q;},async ready(minutes){await this.start(minutes);await engine().tick();await engine().tick();await engine().tick();return (await engine().status()).session;}};
@@ -53,6 +53,14 @@ test('arming time consumes the quoted immutable session and context cannot exten
 test('Hyper validation is 30 minutes and consumes its separate approval once',async()=>{
  const h=harness();h.deps.validationMode=true;const quote=await h.start();assert.equal(quote.minutes,30);assert(quote.maximumUSD<.3);await h.engine().tick();await h.engine().tick();await h.engine().tick();const s=await h.engine().status();assert.equal(s.session.phase,'ready');assert.equal(s.session.minutes,30);await h.engine().stop({sessionId:s.session.id});await h.engine().tick();const q=await h.engine().quote();await assert.rejects(h.engine().start({quoteId:q.id,maximumUSD:q.maximumUSD}),/APPROVAL_ALREADY_USED/);assert.equal(h.creates,1);assert.equal((await h.engine().status()).ordinaryBudget.capUSD,0);
 });
+test('fresh ownership V2 quote permits one simulated empty-label create with both guards and complete cleanup',async()=>{
+ const h=harness();h.deps.validationMode=true;h.flags.emptyLabels=true;const before=(await h.engine().read()).ledger,quote=await h.start(30);await h.engine().tick();const armed=(await h.engine().read()).session;assert.equal(armed.reservation.ownershipPolicy,'nonce-name-v2');await h.engine().tick();assert(h.guards.every(q=>q?.ownershipPolicy==='nonce-name-v2'));assert.equal(h.creates,1);assert.deepEqual(h.rows[0].labels,[]);
+ await h.engine().tick();const s=await h.engine().status(),raw=(await h.engine().read()).session;assert.equal(s.session.phase,'ready');assert.equal(raw.knownAllocations[0].ownershipPolicy,undefined);assert.deepEqual(raw.knownAllocations[0].labels,[]);assert.equal(JSON.parse(raw.quote.lifecycleBinding).ownershipPolicy,'nonce-name-v2');
+ await h.engine().start({quoteId:quote.id,maximumUSD:quote.maximumUSD});assert.equal(h.creates,1);await h.engine().stop({sessionId:s.session.id});assert.equal(await h.engine().context(),null);await h.engine().tick();const done=await h.engine().status();assert.equal(done.session.phase,'stopped');assert.equal(done.testBudget.reservedUSD,0);assert.equal(done.ordinaryBudget.capUSD,0);assert(done.testBudget.spentUpperUSD>before.spent/1e10);assert.deepEqual(h.guards,[null,null]);assert.deepEqual(h.rows,[]);assert(h.calls.filter(c=>c[0]==='disarm').every(c=>c[3].definiteNoCreate===false));assert.equal(h.creates,1);
+});
+test('a stored pre-V2 quote binding cannot authorize a new V2 allocation',async()=>{
+ const h=harness();await h.grant();const quote=await h.engine().quote({minutes:30});await h.engine().tx(r=>{const q=r.quotes.find(q=>q.id===quote.id),old=JSON.parse(q.lifecycleBinding);delete old.ownershipPolicy;q.lifecycleBinding=JSON.stringify(old);});await assert.rejects(h.engine().start({quoteId:quote.id,maximumUSD:quote.maximumUSD}),/QUOTE_CHANGED/);assert.equal(h.creates,0);assert.equal((await h.engine().status()).ordinaryBudget.reservedUSD,0);
+});
 test('missing runtime receipt keeps validating, chat disabled, and cold-start timeout deletes VM',async()=>{
  const h=harness();await h.grant();h.flags.health=false;const s=await h.ready(30);assert.equal(s.phase,'validating');assert.equal(await h.engine().context(),null);h.advance(15*60000);await h.engine().tick();assert.equal((await h.engine().status()).session.phase,'stopped');assert.equal(h.rows.length,0);assert.equal(h.creates,1);
 });
@@ -68,6 +76,11 @@ test('false cleanup receipt and ineffective deletion retain hold; verified recei
 });
 test('wrong expiry proof refuses creation before any provider mutation or charge estimate',async()=>{
  const h=harness();await h.grant();h.flags.receiptExpiry=true;await h.start(30);await h.engine().tick();await h.engine().tick();const s=await h.engine().status();assert.equal(s.session.phase,'failed');assert.equal(s.ordinaryBudget.reservedUSD,0);assert.equal(s.ordinaryBudget.spentUpperUSD,0);assert.equal(h.creates,0);
+});
+test('current-version guards without explicit ownership V2 feature proof cannot authorize paid create',async()=>{
+ for(const missing of ['top','primary','backup']){
+  const h=harness();await h.grant();const original=h.deps.receipts;h.deps.receipts=async q=>{const proof=await original(q);if(missing==='top')delete proof.ownershipPolicy;else delete proof.guards[missing].ownershipPolicy;return proof;};await h.start(30);await h.engine().tick();await h.engine().tick();const status=await h.engine().status();assert.equal(h.creates,0);assert.equal(status.session.phase,'failed');assert.equal(status.ordinaryBudget.reservedUSD,0);assert.equal(status.ordinaryBudget.spentUpperUSD,0);assert.deepEqual(h.guards,[null,null]);assert.equal(await h.engine().context(),null);
+ }
 });
 test('observed volume prevents settlement after VM disappears even if later absence receipt looks clean',async()=>{
  const h=harness();await h.grant();const s=await h.ready(30),before=(await h.engine().status()).ordinaryBudget.reservedUSD;

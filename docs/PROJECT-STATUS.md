@@ -1,31 +1,35 @@
-# Unjailed chat V1 — implementation checkpoint
+# Unjailed chat V1 — current implementation checkpoint
 
-The owner approved the chat-first implementation plan: unchanged Huihui Qwen3 8B v2, repeatable owner-confirmed 15/30/60-minute sessions, automatic cloud saving and draft recovery, manual backup/restore, one concurrent GPU, no laptop dependency. Agent execution, OpenCode, terminal/editor, executable projects, scheduled independent backups and ten-hour sessions remain phase two.
+The goal is private browser chat with the pinned Huihui Qwen3 8B v2 model, owner-confirmed timed sessions, cloud autosave and durable replies, draft recovery, and manual backup/restore. Sessions and shutdown must work without the laptop or Codex. OpenCode, terminal/editor access, executable projects and independent scheduled backups remain phase two. Agent tools and ten-hour sessions are disabled.
 
 ## Current evidence
 
-- The reviewed interface and controller were deployed to the existing Cloudflare resources with Start and inference locked. Public development configs and budget seeds remain synthetic; never deploy them over private configuration or ledgers.
-- The offline image/cache is built and CPU-reviewed. Its intended Runpod runtime failed CUDA initialization before weights loaded. The serving-network release pin remains null.
-- The small native driver diagnostic started quickly on Secure RTX PRO 4500 Blackwell. It passed credential checks, installed the intended network policy, then returned CUDA 304 immediately after two denied UNIX sequenced-packet socket creations. This strongly implicates the IPC policy but is not a complete syscall trace or causal comparison. No model was loaded. The test resource was stopped/deleted and guards restored keyless. See CUDA-DRIVER-RUNPOD-FINDINGS.md.
-- Hyperstack A6000 VM is the selected next target for a controllable equivalent isolation boundary. The funded account displays A6000 + public IP at $0.5067/hour (28 CPU, 58 GB RAM, 100 GB included local root). The preinstalled CUDA 13 image is restricted to B300 hardware; plain Ubuntu 24.04 is selectable with A6000. The owner approved free preparation of a pinned R580 driver bootstrap. Authenticated API IDs, effective permissions and native bootstrap compatibility remain unverified. No VM is approved or provisioned by this implementation checkpoint.
+- The existing Cloudflare interface, controller and independent shutdown resources are deployed. Paid Start, guard arming, inference and ordinary-use allowance remain off. Both source release approval pins are null.
+- The single approved Hyperstack RTX A6000 allocation failed the provider identity gate: its readback returned `labels:[]` despite optional labels being requested. No model permit was issued. That attempt established no native CUDA or Qwen result.
+- The exact allocation was manually deleted. Fresh structured absence and complete inventory checks were followed by operator-specific cloud reconciliation of the controller and both guards. The failure and truthful empty-label readback remain recorded; keyless reconciliation receipts were archived, and session keys and guard key copies were cleared. This was a known-created, manually deleted attempt, not a no-create outcome or a passed acceptance.
+- Earlier Runpod CUDA/network-boundary failures are separate historical evidence; see `CUDA-DRIVER-RUNPOD-FINDINGS.md`. The pinned offline serving artifact passed free published-artifact checks, but the current Hyperstack runtime still needs native validation.
 
-## Work in progress — not release acceptance
+## Prepared V2 candidate — native acceptance outstanding
 
-Provider-independent code now implements in-place revisioned cloud autosave, durable idempotent turns, draft-aware backups, owner usage allowances, repeat sessions and immutable selected durations. The hardened free suite passed 187 checks (105 Node, 44 Workers runtime, 38 Python). A loopback dummy browser walkthrough verified allowance/quote/Start, durable response and draft recovery after reload, export/restore, repeat Start and Stop. New provider/bootstrap components are separate candidates still under review. None of this is a live GPU acceptance or permission to enable paid Start.
+The prepared ownership protocol explicitly uses `nonce-name-v2`: the full random nonce-bearing VM name, exact target and UTC creation window establish initial ownership; durably observed IDs retain that binding through later name or label changes. Labels remain truthful diagnostic data. Reservations without the new version keep the strict legacy V1 label predicate. Historical V1 failure/recovery records are never upgraded into V2 or made eligible for another allocation.
 
-The cloud controller must retain historical/test and ordinary-use ledgers separately, starting ordinary allowance at zero. Owner grants authorize consumption from existing provider credit; they do not purchase credits, change payment settings or renew automatically. Unknown create/cleanup outcomes retain holds and guards.
+Each guard must emit an explicit matching V2 policy receipt, with its current Worker version and immutable reservation/deadline. A current version ID alone cannot substitute for feature support. Both roles must pass before a new create attempt. This is free-tested code preparation; a cloud deployment must preserve the launch locks and does not validate the target VM. The VM code, bootstrap bundle, serving image and model remain unchanged by the ownership repair.
 
-## Four release checkpoints
+The latest local verification passed 264 Node checks, 25 chat Worker tests, 17 controller Durable Object tests and 20 guard Durable Object tests. The Python suite ran 59 tests with one skip. These are CPU/dummy checks, not native GPU or live browser-to-model acceptance.
 
-1. Provider ready: authenticated compatibility, effective permissions, exact all-in quote, and separately approved funding/paid scope.
-2. Free release ready: canonical reviewed source, private config overlay, immutable release manifest, adversarial isolation tests, controller/store/UI failure tests and complete dummy browser walkthrough.
-3. Live acceptance passed: one explicitly approved gated allocation performs model-free checks, then CUDA/model/chat only after the boundary passes, followed by verified destruction and spending reconciliation.
-4. Product released: promote the exact accepted artifact; future owner sessions require an explicit ordinary-use allowance and per-session quote confirmation.
+Cloud autosave, revision conflicts, durable idempotent turns, draft-aware backups, fixed session limits and repeat-session controls are implemented. Historical/test and ordinary-use ledgers stay separate. Ordinary allowance remains zero; owner grants never purchase provider credits or renew sessions automatically. Unknown create or cleanup outcomes retain holds and guards.
 
-Existing test history and model layers are reused. Do not repeat unchanged successful GPU checks, shop between providers automatically, relax failed protections, or start paid resources from a roadmap/status entry. Free CPU evidence does not prove compatibility of a chosen VM.
+## Remaining release gates
+
+1. Review and prepare the free V2 cloud candidate while preserving paid launch locks. Both actual guards must produce the exact V2 feature/version receipts before any future create.
+2. Present a fresh bounded acceptance plan and quote for explicit approval. The previous single-allocation authorization is consumed; no paid retry is authorized by this checkpoint.
+3. On the separately approved allocation, pass native model-free isolation/cache/CUDA checks, independently verify the provider firewall, then permit Qwen loading and a bounded chat reply. Verify login → quote → Start → chat → autosave/reopen/recovery → export/restore → Stop, followed by fresh destruction and resource/billing evidence.
+4. Promote only the exact accepted release. Ordinary use still requires an explicit allowance and owner confirmation of each session quote.
+
+No product release, native compatibility result or completion percentage is implied by source preparation or test counts. Do not relax failed protections, automatically retry, shop providers, or repeat unchanged successful GPU tests.
 
 ## Source and operations
 
-Canonical application source is this reviewed GitHub branch. Private deployment configuration, account identity, cumulative ledgers and receipts stay outside it. The older private Cloudflare source tree is not an alternate deployment source; deploying it can undo reviewed changes. A release must combine this source with a verified private configuration overlay and preserve existing resource/data identities.
+Application changes belong in the canonical checkout/reviewed branch. Private deployment configuration, account identity, cumulative ledgers and receipts stay outside the public repository. Preserve the existing Worker, Durable Object, login and saved-chat identities when applying a reviewed release; the older private source tree is not an alternate codebase.
 
-The existing Linear project tracks chat work in M1/M2. M3–M7 stay in the phase-two backlog. Report concrete pass/failure evidence and the next blocker; do not infer product completion from test counts.
+Report concrete pass/failure evidence and the next gate. Keep full workstation execution separate from completing secure chat acceptance.

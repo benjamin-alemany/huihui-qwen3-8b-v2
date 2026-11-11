@@ -19,18 +19,18 @@ export function hyperstackLifecycle({target,release}={}){
     !imagePattern.test(release.artifact?.servingImage??'')||!/^[a-f0-9]{64}$/.test(release.artifact?.bootstrapLockSha256??'')||!/^[a-f0-9]{64}$/.test(release.artifact?.bootstrapBundleSha256??'')||!/^[a-f0-9]{40}$/.test(release.artifact?.bootstrapSourceCommit??'')||!Number.isSafeInteger(release.artifact?.bootstrapBundleSize)||release.artifact.bootstrapBundleSize<=0||release.artifact.bootstrapBundleSize>256*1024||
     release.artifact?.runtimeProfile!=='vm-inference-v1'||![undefined,null,'vm-run-v1'].includes(release.artifact?.runtimeOrchestrator)||release.hosting?.provider!==PROVIDER||
     release.hosting?.vmImageId!==t.imageId||release.hosting?.vmImageName!==t.imageName||
-    release.hosting?.flavor!==t.flavorName||release.hosting?.region!==t.region||release.hosting?.driverBranch!==580||
+    release.hosting?.flavor!==t.flavorName||release.hosting?.region!==t.region||release.hosting?.driverBranch!==580||release.hosting?.ownershipPolicy!=='nonce-name-v2'||
     release.inference?.origin!==INFERENCE_ORIGIN||release.inference?.completionPath!=='/v1/chat/completions'||release.inference?.healthPath!=='/health'||
     release.model?.repository!=='huihui-ai/Huihui-Qwen3-8B-abliterated-v2'||release.model?.revision!=='7d89db76029281fd8f3e6698a8e30738608105a9'||release.model?.servedName!=='huihui-qwen3-8b-v2'||
     release.sessions?.allowedMinutes?.join()!==durations.join()||release.sessions?.defaultMinutes!==30||release.sessions?.backupDelayMinutes!==1||release.sessions?.cleanupMarginMinutes!==5||release.sessions?.maximumStartupMinutes!==15)reject('HYPERSTACK_RELEASE_UNPINNED',503);
-  const image=release.artifact.servingImage;
+  const image=release.artifact.servingImage,ownershipPolicy='nonce-name-v2';
   // Durable consent binding, independent of mutable constructor inputs. The
   // engine stores it privately on the quote and checks Start and pre-create;
   // it is not a replacement for source approval or runtime verification.
-  const binding=JSON.stringify({provider:PROVIDER,image,target:t,bootstrapLockSha256:release.artifact.bootstrapLockSha256,bootstrapBundleSha256:release.artifact.bootstrapBundleSha256,bootstrapSourceCommit:release.artifact.bootstrapSourceCommit,bootstrapBundleSize:release.artifact.bootstrapBundleSize,modelRevision:release.model.revision,runtimeProfile:release.artifact.runtimeProfile,runtimeOrchestrator:release.artifact.runtimeOrchestrator??null});
+  const binding=JSON.stringify({provider:PROVIDER,ownershipPolicy,image,target:t,bootstrapLockSha256:release.artifact.bootstrapLockSha256,bootstrapBundleSha256:release.artifact.bootstrapBundleSha256,bootstrapSourceCommit:release.artifact.bootstrapSourceCommit,bootstrapBundleSize:release.artifact.bootstrapBundleSize,modelRevision:release.model.revision,runtimeProfile:release.artifact.runtimeProfile,runtimeOrchestrator:release.artifact.runtimeOrchestrator??null});
   const reservationChecked=q=>{
     try{validateReservation(q,t);}catch{reject('HYPERSTACK_RESERVATION_INVALID',503);}
-    if(q?.provider!==PROVIDER||q.kind!=='chat'||q.image!==image||!durations.includes(q.minutes)||q.windowStart!==new Date(q.createdNotBefore).toISOString()||q.windowEnd!==new Date(q.createdNotAfter).toISOString()||q.deadline!==q.createdNotBefore+q.minutes*60_000)reject('HYPERSTACK_RESERVATION_INVALID',503);
+    if(q?.provider!==PROVIDER||q.kind!=='chat'||q.ownershipPolicy!==ownershipPolicy||q.image!==image||!durations.includes(q.minutes)||q.windowStart!==new Date(q.createdNotBefore).toISOString()||q.windowEnd!==new Date(q.createdNotAfter).toISOString()||q.deadline!==q.createdNotBefore+q.minutes*60_000)reject('HYPERSTACK_RESERVATION_INVALID',503);
     return q;
   };
   function validate(p,q,maxGpuHourly){
@@ -44,7 +44,7 @@ export function hyperstackLifecycle({target,release}={}){
     return c;
   };
   return Object.freeze({
-    provider:PROVIDER,image,target:t,binding,
+    provider:PROVIDER,ownershipPolicy,image,target:t,binding,
     catalogFrom(raw){
       if(raw?.provider!==PROVIDER||raw.catalogVerified!==true||raw.gpu!=='RTX-A6000'||raw.gpuCount!==1||raw.vramGB!==48||raw.cpu!==28||raw.ramGB!==58||raw.rootDiskGB!==100||JSON.stringify(raw.target)!==JSON.stringify(t)||!finite(raw.publicIpHourlyUSD)||raw.publicIpHourlyUSD<0||raw.totalHourlyUSD!==raw.gpuHourlyUSD+raw.publicIpHourlyUSD)reject('HYPERSTACK_CATALOG_INVALID',503);
       return quoteCatalog({provider:PROVIDER,gpu:'RTX-A6000',gpuHourly:raw.gpuHourlyUSD,totalHourly:raw.totalHourlyUSD,availability:raw.availability});
@@ -65,7 +65,7 @@ export function hyperstackLifecycle({target,release}={}){
     },
     reservation(now,nonce,minutes=30){
       if(!Number.isSafeInteger(now)||!durations.includes(minutes))reject('INVALID_DURATION',400);
-      const q={kind:'chat',provider:PROVIDER,minutes,name:`unjailed-chat-${nonce}`,image,nonce,target:structuredClone(t),createdNotBefore:now,createdNotAfter:now+5*60_000,deadline:now+minutes*60_000,windowStart:new Date(now).toISOString(),windowEnd:new Date(now+5*60_000).toISOString()};
+      const q={kind:'chat',provider:PROVIDER,ownershipPolicy,minutes,name:`unjailed-chat-${nonce}`,image,nonce,target:structuredClone(t),createdNotBefore:now,createdNotAfter:now+5*60_000,deadline:now+minutes*60_000,windowStart:new Date(now).toISOString(),windowEnd:new Date(now+5*60_000).toISOString()};
       return reservationChecked(q);
     },
     matches(p,q){reservationChecked(q);return matchesReservation(p,q);},validate,
@@ -93,10 +93,10 @@ export function hyperstackLifecycle({target,release}={}){
     isFailed:p=>p?.provider===PROVIDER&&['ERROR','SHUTOFF','HIBERNATED','DELETED','SUSPENDED','STOPPED'].includes(p.status),
     receiptFresh(proof,q,now){
       reservationChecked(q);
-      if(!Number.isSafeInteger(now)||now<q.createdNotBefore||now>=q.createdNotAfter||now>=q.deadline||proof?.schedulerReady!==true||proof.provider!==PROVIDER||proof.reservationName!==q.name||proof.image!==image||proof.nonce!==q.nonce||proof.deadline!==q.deadline)reject('GUARD_RECEIPTS_EXPIRED');
+      if(!Number.isSafeInteger(now)||now<q.createdNotBefore||now>=q.createdNotAfter||now>=q.deadline||proof?.schedulerReady!==true||proof.provider!==PROVIDER||proof.ownershipPolicy!==ownershipPolicy||proof.reservationName!==q.name||proof.image!==image||proof.nonce!==q.nonce||proof.deadline!==q.deadline)reject('GUARD_RECEIPTS_EXPIRED');
       for(const role of ['primary','backup']){
         const r=proof.guards?.[role];
-        if(r?.role!==role||r.mode!=='reservation'||r.nonce!==q.nonce||r.expiry!==q.deadline+(role==='backup'?60_000:0)||!uuid.test(r.version??'')||!Number.isSafeInteger(r.eventTimestamp)||now-r.eventTimestamp<0||now-r.eventTimestamp>90_000)reject('GUARD_RECEIPTS_EXPIRED');
+        if(r?.role!==role||r.mode!=='reservation'||r.ownershipPolicy!==ownershipPolicy||r.nonce!==q.nonce||r.expiry!==q.deadline+(role==='backup'?60_000:0)||!uuid.test(r.version??'')||!Number.isSafeInteger(r.eventTimestamp)||now-r.eventTimestamp<0||now-r.eventTimestamp>90_000)reject('GUARD_RECEIPTS_EXPIRED');
       }
       // Current-version equality is established by authenticated tail parsing
       // and the engine's separate checkVersions(proof), never by model output.

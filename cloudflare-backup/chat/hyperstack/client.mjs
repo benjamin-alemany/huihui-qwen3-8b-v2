@@ -1,5 +1,5 @@
 import {boundedJSON} from '../policy.mjs';
-import {API_BASE,INFERENCE_ORIGIN,validateTarget,validateCatalog,normalizeVM,validateReservation,matchesReservation,assertBound,providerId,absenceReceipt,fail} from './policy.mjs';
+import {API_BASE,INFERENCE_ORIGIN,NONCE_NAME_OWNERSHIP,validateTarget,validateCatalog,normalizeVM,validateReservation,matchesReservation,assertBound,providerId,absenceReceipt,fail} from './policy.mjs';
 
 export const FIREWALL_POLICY='tunnel-dns-egress-v1';
 export const SEALED_RULES=Object.freeze([
@@ -149,7 +149,7 @@ export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl
       }catch(e){if(e instanceof CreateError)throw e;throw new CreateError('HYPERSTACK_CREATE_PREFLIGHT_REJECTED','definite-no-create');}
       // Caller MUST first durably consume its nonce/createAttempted flag and
       // arm both guards. This local set adds protection, not restart durability.
-      let r;try{r=await request('/core/virtual-machines',{method:'POST',body:{count:1,environment_name:t.environmentName,flavor_name:t.flavorName,image_id:t.imageId,key_name:t.keyName,name:q.name,user_data:userData,assign_floating_ip:true,enable_port_randomization:false,create_bootable_volume:false,security_rules:[],labels:[`unjailed:${q.nonce}`]}});}catch{throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');}
+      let r;try{r=await request('/core/virtual-machines',{method:'POST',body:{count:1,environment_name:t.environmentName,flavor_name:t.flavorName,image_id:t.imageId,key_name:t.keyName,name:q.name,user_data:userData,assign_floating_ip:true,enable_port_randomization:false,create_bootable_volume:false,security_rules:[],...(q.ownershipPolicy===NONCE_NAME_OWNERSHIP?{}:{labels:[`unjailed:${q.nonce}`]})}});}catch{throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');}
       if(r.status===400&&r.data?.status===false&&r.data.error_reason==='compatibility_blocked'&&r.data.compatibility_status==='BLOCKED')throw new CreateError('HYPERSTACK_IMAGE_INCOMPATIBLE','definite-no-create');
       if(r.status!==200||r.data?.status!==true||!Array.isArray(r.data.instances)||r.data.instances.length!==1)throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');
       let p;try{p=normalizeVM(r.data.instances[0]);if(!matchesReservation(p,q))fail('HYPERSTACK_CREATE_IDENTITY_MISMATCH');}catch{throw new CreateError('HYPERSTACK_CREATE_READBACK_UNCONFIRMED');}

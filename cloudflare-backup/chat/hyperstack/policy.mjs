@@ -4,6 +4,7 @@ export const PROVIDER='hyperstack';
 export const API_ORIGIN='https://infrahub-api.nexgencloud.com';
 export const API_BASE=API_ORIGIN+'/v1';
 export const INFERENCE_ORIGIN='https://inference.unjailed.work';
+export const NONCE_NAME_OWNERSHIP='nonce-name-v2';
 export const SOURCES=Object.freeze({
   schema:'https://docs.hyperstack.cloud/openapi/hyperstack.json',
   deletion:'https://docs.hyperstack.cloud/docs/api-reference/delete-vm/',
@@ -17,6 +18,23 @@ export function fail(code){throw Error(code);}
 export function providerId(value){if(typeof value==='string'&&/^[1-9][0-9]{0,14}$/.test(value))value=Number(value);if(!int(value))fail('HYPERSTACK_ID_INVALID');return String(value);}
 function id(value){return Number(providerId(value));}
 function epoch(value){const n=typeof value==='string'?Date.parse(value):NaN;if(!Number.isFinite(n))fail('HYPERSTACK_TIMESTAMP_INVALID');return n;}
+// Hyperstack's observed created_at wire form may omit a zone. Under explicit
+// V2 ownership it denotes provider UTC, never the operator laptop's local time.
+// Retain the original string in readbacks; compare the represented UTC instant.
+export function providerCreatedAtUTC(value){
+  const m=typeof value==='string'&&value.length<=64?value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})?$/):null;
+  if(!m)fail('HYPERSTACK_TIMESTAMP_INVALID');
+  const [year,month,day,hour,minute,second]=m.slice(1,7).map(Number),calendar=new Date(0);
+  calendar.setUTCFullYear(year,month-1,day);calendar.setUTCHours(hour,minute,second,0);
+  if(calendar.getUTCFullYear()!==year||calendar.getUTCMonth()!==month-1||calendar.getUTCDate()!==day||calendar.getUTCHours()!==hour||calendar.getUTCMinutes()!==minute||calendar.getUTCSeconds()!==second)fail('HYPERSTACK_TIMESTAMP_INVALID');
+  const n=Date.parse(m[8]?value:value+'Z');if(!Number.isSafeInteger(n))fail('HYPERSTACK_TIMESTAMP_INVALID');return n;
+}
+export function creationTimestampIdentity(value,reservation){
+  const q=validateReservation(reservation);
+  if(q.ownershipPolicy===NONCE_NAME_OWNERSHIP)return new Date(providerCreatedAtUTC(value)).toISOString();
+  // Existing V1 bindings and permit records retain exact wire-string identity.
+  epoch(value);return value;
+}
 export function validateTarget(t){
   if(!plain(t)||t.region!=='CANADA-1'||t.flavorName!=='n3-RTX-A6000x1'||t.imageName!=='Ubuntu Server 24.04 LTS (Noble Numbat)'||!text(t.environmentName)||!text(t.keyName)||t.inferenceOrigin!==INFERENCE_ORIGIN)fail('HYPERSTACK_TARGET_INVALID');
   for(const k of ['environmentId','flavorId','imageId'])id(t[k]);
@@ -68,17 +86,25 @@ export function validateReservation(r,target){
   // Optional controller wire metadata is kept as one strict allowlisted group.
   // It must survive into the independent guard and trusted bootstrap callback;
   // no arbitrary fields (especially credentials/user_data) are copied through.
-  if(['kind','provider','minutes','image','windowStart','windowEnd'].some(k=>k in r)){
+  if(['kind','provider','minutes','image','windowStart','windowEnd','ownershipPolicy'].some(k=>k in r)){
     if(r.kind!=='chat'||r.provider!==PROVIDER||![15,30,60].includes(r.minutes)||!/^ghcr\.io\/benjamin-alemany\/huihui-qwen3-8b-v2@sha256:[a-f0-9]{64}$/.test(r.image??'')||r.deadline!==r.createdNotBefore+r.minutes*60_000||r.windowStart!==new Date(r.createdNotBefore).toISOString()||r.windowEnd!==new Date(r.createdNotAfter).toISOString())fail('HYPERSTACK_RESERVATION_METADATA_INVALID');
+    if('ownershipPolicy'in r&&r.ownershipPolicy!==NONCE_NAME_OWNERSHIP)fail('HYPERSTACK_OWNERSHIP_POLICY_INVALID');
     Object.assign(q,{kind:r.kind,provider:r.provider,minutes:r.minutes,image:r.image,windowStart:r.windowStart,windowEnd:r.windowEnd});
+    if('ownershipPolicy'in r)q.ownershipPolicy=NONCE_NAME_OWNERSHIP;
   }
   return q;
 }
 function targetMatches(p,t){return p.provider===PROVIDER&&p.environment?.id===t.environmentId&&p.environment.name===t.environmentName&&p.environment.region===t.region&&p.flavor?.id===t.flavorId&&p.flavor.name===t.flavorName&&p.flavor.gpu==='RTX-A6000'&&p.flavor.count===1&&p.flavor.cpu===28&&p.flavor.ram===58&&p.flavor.disk===100&&p.bootImageName===t.imageName;}
-export function matchesReservation(p,r){const q=validateReservation(r);const created=Date.parse(p?.createdAt);return targetMatches(p??{},q.target)&&p.name===q.name&&p.labels?.includes(`unjailed:${q.nonce}`)&&created>=q.createdNotBefore&&created<=q.createdNotAfter;}
+export function matchesReservation(p,r){
+  const q=validateReservation(r);let created;
+  try{created=q.ownershipPolicy===NONCE_NAME_OWNERSHIP?providerCreatedAtUTC(p?.createdAt):Date.parse(p?.createdAt);}catch{return false;}
+  const marker=q.ownershipPolicy===NONCE_NAME_OWNERSHIP||p?.labels?.includes(`unjailed:${q.nonce}`);
+  return targetMatches(p??{},q.target)&&p.name===q.name&&marker&&created>=q.createdNotBefore&&created<=q.createdNotAfter;
+}
 export function assertBound(current,bound,r){
   const q=validateReservation(r);
-  if(!matchesReservation(bound,q)||providerId(current?.id)!==providerId(bound.id)||current.createdAt!==bound.createdAt||!targetMatches(current,q.target))fail('HYPERSTACK_OWNERSHIP_UNCONFIRMED');
+  let sameCreated=false;try{sameCreated=creationTimestampIdentity(current?.createdAt,q)===creationTimestampIdentity(bound?.createdAt,q);}catch{/* Invalid provider time never establishes identity. */}
+  if(!matchesReservation(bound,q)||providerId(current?.id)!==providerId(bound.id)||!sameCreated||!targetMatches(current,q.target))fail('HYPERSTACK_OWNERSHIP_UNCONFIRMED');
   // Name/labels may change after a successful durable binding. Immutable ID,
   // original creation time, boot image name, environment and flavor still bind.
   return current;

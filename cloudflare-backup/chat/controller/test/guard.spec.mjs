@@ -189,11 +189,15 @@ it('Hyperstack scheduled proof is emitted only for the exact waiting reservation
  const workerEnv={...env,HOSTING_PROVIDER:'hyperstack',CHAT_STOP_ROLE:'primary',STOP_RESERVATION:{getByName:()=>stub}};
  try{
   await stub.arm({reservation:q,key:hyperKey});await guardWorker.scheduled(null,workerEnv);
-  const waiting=JSON.parse(logs.mock.calls.at(-1)[0]);expect(waiting).toMatchObject({event:'guard_tick',provider:'hyperstack',status:'waiting-for-reserved-vm',name:q.name,reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,expiry:q.deadline});expect(JSON.stringify(waiting)).not.toContain(hyperKey);
+  const waiting=JSON.parse(logs.mock.calls.at(-1)[0]);expect('ownershipPolicy'in waiting).toBe(false);expect(waiting).toMatchObject({event:'guard_tick',provider:'hyperstack',status:'waiting-for-reserved-vm',name:q.name,reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,expiry:q.deadline});expect(JSON.stringify(waiting)).not.toContain(hyperKey);
   f.vms.push(rawVM({name:q.name,created_at:new Date(q.createdNotBefore).toISOString(),labels:['unjailed:'+q.nonce]}));await guardWorker.scheduled(null,workerEnv);expect(JSON.parse(logs.mock.calls.at(-1)[0]).status).not.toBe('waiting-for-reserved-vm');
   await stub.shorten(q.name,Date.now());await guardWorker.scheduled(null,workerEnv);expect(JSON.parse(logs.mock.calls.at(-1)[0]).status).not.toBe('waiting-for-reserved-vm');
   await stub.disarm(q.name);expect((await stub.report()).armed).toBe(false);
  }finally{spy.mockRestore();logs.mockRestore();}
+});
+it('scheduled V2 guard proof explicitly identifies supported ownership semantics; V1 remains unversioned',async()=>{
+ const stub=await hyperStub(),q={...hyperReservation(),ownershipPolicy:'nonce-name-v2'},f=hyperFixture(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(f.fetch),logs=vi.spyOn(console,'log').mockImplementation(()=>{});
+ try{await stub.arm({reservation:q,key:hyperKey});expect((await stub.report()).ownershipPolicy).toBe('nonce-name-v2');await guardWorker.scheduled(null,{...env,HOSTING_PROVIDER:'hyperstack',CHAT_STOP_ROLE:'primary',STOP_RESERVATION:{getByName:()=>stub}});const tick=JSON.parse(logs.mock.calls.at(-1)[0]);expect(tick).toMatchObject({event:'guard_tick',ownershipPolicy:'nonce-name-v2',status:'waiting-for-reserved-vm',nonce:q.nonce,image:q.image,deadline:q.deadline,expiry:q.deadline});expect(JSON.stringify(tick)).not.toContain(hyperKey);await stub.disarm(q.name,{definiteNoCreate:true});}finally{spy.mockRestore();logs.mockRestore();}
 });
 it('operator-absence private RPC requires locked source policy and archives only fresh independent proof',async()=>{
  const start=Date.now()-6*60000,q={...hyperReservation(),createdNotBefore:start,createdNotAfter:start+300000,deadline:start+1800000,windowStart:new Date(start).toISOString(),windowEnd:new Date(start+300000).toISOString()},stub=await hyperStub(),f=hyperFixture();

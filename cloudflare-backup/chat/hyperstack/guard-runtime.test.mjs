@@ -21,6 +21,10 @@ function harness(role='primary'){
 test('runtime stores its own key separately and emits only immutable keyless reservation evidence',async()=>{
  const h=harness(),q=reservation(),armed=await h.runtime.arm(q,SECRET);assert.equal(armed.armed,true);assert.equal(armed.name,q.name);assert.equal(armed.image,IMAGE);assert.equal(armed.deadline,q.deadline);assert.equal(armed.expiry,q.deadline);assert.equal(armed.minutes,30);assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);assert(!JSON.stringify(armed).includes(SECRET));assert((await h.store.get('$alarm'))<=NOW+100);
  await assert.rejects(h.runtime.arm({...q,image:IMAGE.slice(0,-1)+'b'},SECRET));await assert.rejects(h.runtime.arm(q,SECRET+'changed'));
+ assert.equal('ownershipPolicy'in armed,false);
+});
+test('ownership V2 is preserved in keyless guard reports and across runtime handles without upgrading V1',async()=>{
+ const h=harness(),q={...reservation(),ownershipPolicy:'nonce-name-v2'};const report=await h.runtime.arm(q,SECRET);assert.equal(report.ownershipPolicy,'nonce-name-v2');assert.equal((await h.fresh().report()).ownershipPolicy,'nonce-name-v2');assert.equal((await h.runtime.tick()).ownershipPolicy,'nonce-name-v2');assert(!JSON.stringify(report).includes(SECRET));
 });
 test('deadline cleanup archives retained IDs, removes the key and permits a distinct next session',async()=>{
  const h=harness(),q=reservation();await h.runtime.arm(q,SECRET);h.s.vms.push(rawVM());await h.runtime.tick();h.time=q.deadline;

@@ -1,5 +1,5 @@
 import {boundedJSON} from '../policy.mjs';
-import {INFERENCE_ORIGIN} from './policy.mjs';
+import {INFERENCE_ORIGIN,creationTimestampIdentity} from './policy.mjs';
 const LEDGER='session-ledger-v1',PREFIX='hyperstack-runtime-handshake-v1:';
 const READY='/__unjailed/host-ready',ALLOW='/__unjailed/allow-model';
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -25,10 +25,10 @@ export function runtimeHandshake({storage,target,release,lifecycle,sealFirewall,
   const record=await storage.get(LEDGER),session=checkSession(record,q??record?.session?.reservation,{target,release,now:now()});
   lifecycle.validate(allocation,session.reservation,Infinity);
   const s=record.session,known=s.knownAllocations?.find(p=>p.id===allocation.id)??(s.pod?.id===allocation.id?s.pod:null);
-  if(!known||!s.knownPodIds?.includes(allocation.id)||known.createdAt!==allocation.createdAt)refuse();
+  if(!known||!s.knownPodIds?.includes(allocation.id)||creationTimestampIdentity(known.createdAt,session.reservation)!==creationTimestampIdentity(allocation.createdAt,session.reservation))refuse();
   lifecycle.validate(known,session.reservation,Infinity);return session;
  }
- const identity=(session,allocation)=>({version:1,sessionId:session.id,nonce:session.nonce,deadline:session.deadline,reservation:session.reservation,allocationId:allocation.id,allocationCreatedAt:allocation.createdAt,bootstrapLockSha256:release.artifact.bootstrapLockSha256,bootstrapBundleSha256:release.artifact.bootstrapBundleSha256,runtimeProfile:release.artifact.runtimeProfile});
+ const identity=(session,allocation)=>({version:1,sessionId:session.id,nonce:session.nonce,deadline:session.deadline,reservation:session.reservation,allocationId:allocation.id,allocationCreatedAt:creationTimestampIdentity(allocation.createdAt,session.reservation),bootstrapLockSha256:release.artifact.bootstrapLockSha256,bootstrapBundleSha256:release.artifact.bootstrapBundleSha256,runtimeProfile:release.artifact.runtimeProfile});
  const sameSession=(a,b)=>a.id===b.id&&a.nonce===b.nonce&&a.deadline===b.deadline&&a.inferenceKey===b.inferenceKey&&a.modelKey===b.modelKey&&same(a.reservation,b.reservation);
  function markerChecked(marker,pins){
   if(!plain(marker)||!['permit-requested','permitted'].includes(marker.phase)||!same(marker.identity,pins))refuse();

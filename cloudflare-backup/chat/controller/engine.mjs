@@ -3,6 +3,10 @@ import {SEED,SCALE,SessionError,terminal,catalogFrom,makeQuote,reservation,podMa
 const recordKey='session-ledger-v1';
 const legacyLifecycle={catalogFrom,makeQuote,reservation,matches:podMatches,validate:validatePod,createBody,receiptFresh,quoteMinutes,cleanupComplete:r=>r===true,priceAccept:(p,s)=>p.cost<=s.quote.gpuHourlyUSD,isRunning:p=>p.status==='RUNNING',isFailed:p=>['EXITED','ERROR'].includes(p.status),context:s=>({CHAT_ENABLED:'true',CHAT_SESSION:JSON.stringify({podId:s.pod.id,createdAt:new Date(s.bootAt).toISOString(),nonce:s.nonce,minutes:sessionMinutes(s)}),INFERENCE_API_KEY:s.inferenceKey})};
 const knownPodIds=s=>[...new Set([...(s.knownPodIds??[]),...(s.pod?[s.pod.id]:[])])];
+function keylessGuardProof(proof,q,verifiedAt){
+ const pick=(value,keys)=>Object.fromEntries(keys.filter(k=>['string','number'].includes(typeof value?.[k])).map(k=>[k,value[k]]));
+ return {verifiedAt,...pick(q,['provider','ownershipPolicy','name','image','nonce','deadline']),guards:Object.fromEntries(['primary','backup'].map(role=>[role,{role,...pick(proof.guards[role],['worker','version','eventTimestamp','mode','nonce','expiry','ownershipPolicy'])}]))};
+}
 // All account state is durable. No network I/O runs inside a transaction.
 export class SessionEngine {
   constructor(storage,deps){this.storage=storage;this.d=deps;this.lifecycle=deps.lifecycle??legacyLifecycle;}
@@ -192,6 +196,7 @@ export class SessionEngine {
           if(!this.d.enabled||this.budgetKind()!==kind||(kind==='test'&&this.d.approval!==current.approval))throw new SessionError('LAUNCH_LOCKED');
           if(current.quote.lifecycleBinding!==this.currentBinding())throw new SessionError('QUOTE_CHANGED');
           this.lifecycle.receiptFresh(proof,current.reservation,this.d.now());
+          current.guardProof=keylessGuardProof(proof,current.reservation,this.d.now());
           current.bootAt=current.reservation.createdNotBefore??this.d.now();current.deadline=current.reservation.deadline??current.bootAt+sessionMinutes(current)*60000;current.phase='reconciling';current.createAttempted=true;
           if(kind==='test')r.ledger.usedApprovals.push(current.approval);return this.lifecycle.createBody(current,current.bootAt);
         });

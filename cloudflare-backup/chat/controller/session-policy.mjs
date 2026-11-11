@@ -51,7 +51,7 @@ export function createBody(s,now){
 export function safeSession(s){
   if(!s)return null;
   return {id:s.id,quoteId:s.quoteId,minutes:sessionMinutes(s),phase:s.phase,code:s.code??null,stopRequested:!!s.stopRequested,createdAt:s.pod?.createdAt??null,deadline:s.deadline?new Date(s.deadline).toISOString():null,
-    maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted};
+    maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted,...(s.guardProof?{guardProof:structuredClone(s.guardProof)}:{})};
 }
 export function budgetView(l,originalAcceptance=ORIGINAL_ACCEPTANCE){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),originalAcceptance:originalAcceptance===null?null:parseOriginalAcceptance(JSON.stringify(originalAcceptance))};}
 export function ordinaryBudgetView(l){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),grantCount:l.grantCount};}

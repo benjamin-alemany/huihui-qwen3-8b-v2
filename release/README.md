@@ -33,3 +33,16 @@ migration rather than silently reassigned to another provider client.
 Free runtime boundary evidence: [CPU run 42939042999](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42939042999).
 Exact published-artifact verification: [run 42942763420](https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42942763420).
 Neither run loaded Qwen or validated the target GPU.
+
+## Ownership compatibility
+
+Local V2 preparation pins `hosting.ownershipPolicy: nonce-name-v2` in the release,
+source approval and quote consent binding. New reservations carry that explicit
+version and bind the full random nonce-bearing name, target and creation window;
+provider labels remain truthful diagnostic data. Absent ownership policy retains
+the old label-based V1 predicate. The failed V1 attempt and its operator cleanup
+record are historical evidence, not V2 reservations or permission to retry.
+
+This controller ownership change leaves the pinned VM code, bootstrap bundle,
+serving image and model unchanged. Both approval pins remain null. V2 has only
+local CPU/dummy coverage until separately approved native acceptance succeeds.

@@ -6,7 +6,7 @@ import {SessionError,parseOriginalAcceptance} from '../controller/session-policy
 import {hyperstackClient} from './client.mjs';
 import {hyperstackLifecycle} from './controller-policy.mjs';
 import {runtimeHandshake} from './runtime-handshake.mjs';
-import {INFERENCE_ORIGIN,validateTarget,validateReservation} from './policy.mjs';
+import {INFERENCE_ORIGIN,creationTimestampIdentity,validateTarget,validateReservation} from './policy.mjs';
 
 const LEDGER='session-ledger-v1',HOST_READY_PATH='/__unjailed/host-ready';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -66,7 +66,7 @@ export function boundHealthVerifier({storage,target,release,lifecycle,fetchImpl=
    const session=sessionChecked(before,s?.reservation,{target,release,now:now()});
    lifecycle.validate(allocation,session.reservation,Infinity);
    const observed=s.knownAllocations?.find(p=>p.id===allocation.id)??(s.pod?.id===allocation.id?s.pod:null);
-   if(!observed||!s.knownPodIds?.includes(allocation.id)||key!==session.inferenceKey||observed.createdAt!==allocation.createdAt)refused('HYPERSTACK_HEALTH_BINDING_INVALID');
+   if(!observed||!s.knownPodIds?.includes(allocation.id)||key!==session.inferenceKey||creationTimestampIdentity(observed.createdAt,session.reservation)!==creationTimestampIdentity(allocation.createdAt,session.reservation))refused('HYPERSTACK_HEALTH_BINDING_INVALID');
    lifecycle.validate(observed,session.reservation,Infinity);
    const response=await fetchImpl(INFERENCE_ORIGIN+HOST_READY_PATH,{headers:{Authorization:'Bearer '+key,Accept:'application/json','User-Agent':'unjailed-private-chat/1.0'},redirect:'manual',signal:AbortSignal.timeout(8000)});
    if(response.status!==200){await response.body?.cancel();return false;}

@@ -30,10 +30,10 @@ export function receiptFrom(event,versions,reservation,{now=Date.now(),heartbeat
       if(heartbeatOnly){if(tick.status!=='unarmed'||tick.reservationName||tick.image)continue;}
       else if(reservation?.provider==='hyperstack'){
         let q;try{q=validateReservation(reservation);}catch{continue;}
-        if(tick.provider!=='hyperstack'||tick.status!=='waiting-for-reserved-vm'||tick.reservationName!==q.name||tick.image!==q.image||tick.nonce!==q.nonce||tick.deadline!==q.deadline||tick.expiry!==q.deadline+(role==='backup'?60000:0))continue;
+        if(tick.provider!=='hyperstack'||tick.status!=='waiting-for-reserved-vm'||tick.ownershipPolicy!==q.ownershipPolicy||tick.reservationName!==q.name||tick.image!==q.image||tick.nonce!==q.nonce||tick.deadline!==q.deadline||tick.expiry!==q.deadline+(role==='backup'?60000:0))continue;
       }else if(tick.status!=='waiting-for-reserved-pod'||tick.reservationName!==reservation?.name||tick.image!==reservation?.image)continue;
       // Do not retain raw logs, errors, request headers, URLs, tokens or prompt text.
-      return {role,worker,version:versions[worker],eventTimestamp:timestamp,mode:heartbeatOnly?'unarmed-heartbeat':'reservation',...(!heartbeatOnly&&reservation?.provider==='hyperstack'?{nonce:reservation.nonce,expiry:tick.expiry}:{})};
+      return {role,worker,version:versions[worker],eventTimestamp:timestamp,mode:heartbeatOnly?'unarmed-heartbeat':'reservation',...(!heartbeatOnly&&reservation?.provider==='hyperstack'?{...(reservation.ownershipPolicy!==undefined?{ownershipPolicy:reservation.ownershipPolicy}:{}),nonce:reservation.nonce,expiry:tick.expiry}:{})};
     }
   }
   return null;
@@ -47,5 +47,5 @@ export function verifyGuardReceipts(reservation,versions,events,{now=Date.now()}
   const found={};
   for(const event of events){const r=receiptFrom(event,versions,reservation,{now});if(r)found[r.role]=r;}
   if(Object.keys(found).sort().join()!=='backup,primary')throw Error('Both current guards must execute this reservation before paid creation');
-  return {schedulerReady:true,reservationName:reservation.name,image:reservation.image,receiptMaxAgeSeconds:90,guards:found,...(reservation?.provider==='hyperstack'?{provider:'hyperstack',nonce:reservation.nonce,deadline:reservation.deadline}:{})};
+  return {schedulerReady:true,reservationName:reservation.name,image:reservation.image,receiptMaxAgeSeconds:90,guards:found,...(reservation?.provider==='hyperstack'?{provider:'hyperstack',...(reservation.ownershipPolicy!==undefined?{ownershipPolicy:reservation.ownershipPolicy}:{}),nonce:reservation.nonce,deadline:reservation.deadline}:{})};
 }

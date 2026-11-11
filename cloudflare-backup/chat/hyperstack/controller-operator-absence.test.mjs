@@ -12,7 +12,8 @@ import {NOW,TARGET,rawVM,Store} from './fixtures.mjs';
 class EngineStore extends Store{async setAlarm(n){this.alarm=n;}async deleteAlarm(){this.alarm=null;}}
 async function harness(){
  const release={...structuredClone(manifest),status:'candidate',artifact:{...manifest.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64)},hosting:{...manifest.hosting,vmImageId:33}},lifecycle=hyperstackLifecycle({target:TARGET,release});
- const q=validateReservation(lifecycle.reservation(NOW,'a'.repeat(32),30)),quote=lifecycle.makeQuote({provider:'hyperstack',gpu:'RTX-A6000',gpuHourly:.5,totalHourly:.50672043,availability:'AVAILABLE'},NOW,'33333333-3333-4333-8333-333333333333',30);
+ const historical=lifecycle.reservation(NOW,'a'.repeat(32),30);delete historical.ownershipPolicy;
+ const q=validateReservation(historical),quote=lifecycle.makeQuote({provider:'hyperstack',gpu:'RTX-A6000',gpuHourly:.5,totalHourly:.50672043,availability:'AVAILABLE'},NOW,'33333333-3333-4333-8333-333333333333',30);
  const packet={version:1,id:'11111111-1111-4111-8111-111111111111',sessionId:'22222222-2222-4222-8222-222222222222',approvalId:'DUMMY_ONE_ACCEPTANCE',reservation:q,allocation:normalizeVM(rawVM({labels:[]})),observedAt:NOW+1000,deleteRequestedAt:NOW+2000,absenceObservedAt:NOW+3000,reason:'MISSING_PROVIDER_LABEL'};
  const session={id:packet.sessionId,quoteId:quote.id,quote,reservation:q,approval:packet.approvalId,budgetKind:'test',createAttempted:true,phase:'attention',stopRequested:true,everReady:false,nonce:q.nonce,bootAt:q.createdNotBefore,deadline:q.deadline,inferenceKey:'c'.repeat(64),modelKey:'d'.repeat(64),leaseUntil:0};
  const store=new EngineStore(),ledger={...structuredClone(SEED),cap:2*SCALE,spent:Math.round(.4*SCALE),held:quote.holdUnits,usedApprovals:['DUMMY_EARLIER_APPROVAL',packet.approvalId]};

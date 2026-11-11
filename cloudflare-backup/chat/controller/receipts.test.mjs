@@ -112,3 +112,12 @@ test('Hyperstack scheduled receipts require exact nonce and both immutable destr
  }
  assert.throws(()=>verifyGuardReceipts(q,versions,[event('primary'),event('backup')],{now}));
 });
+
+test('ownership V2 requires explicit matching feature evidence from both current guard versions',async()=>{
+ const {TARGET}=await import('../hyperstack/fixtures.mjs');
+ const q={provider:'hyperstack',kind:'chat',minutes:30,ownershipPolicy:'nonce-name-v2',name:'unjailed-chat-'+'a'.repeat(32),nonce:'a'.repeat(32),image:reservation.image,target:TARGET,createdNotBefore:now-60000,createdNotAfter:now+120000,deadline:now-60000+30*60000,windowStart:reservation.windowStart,windowEnd:reservation.windowEnd};
+ const events=['primary','backup'].map(role=>({...event(role),logs:[{message:[JSON.stringify({event:'guard_tick',provider:'hyperstack',role,status:'waiting-for-reserved-vm',ownershipPolicy:'nonce-name-v2',reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,expiry:q.deadline+(role==='backup'?60000:0)})]}]}));
+ const proof=verifyGuardReceipts(q,versions,events,{now});assert.equal(proof.ownershipPolicy,'nonce-name-v2');assert.equal(proof.guards.primary.ownershipPolicy,'nonce-name-v2');assert.equal(proof.guards.backup.ownershipPolicy,'nonce-name-v2');
+ for(const role of [0,1])for(const value of [undefined,null,'label-v1']){const bad=structuredClone(events),tick=JSON.parse(bad[role].logs[0].message[0]);if(value===undefined)delete tick.ownershipPolicy;else tick.ownershipPolicy=value;bad[role].logs[0].message[0]=JSON.stringify(tick);assert.throws(()=>verifyGuardReceipts(q,versions,bad,{now}));}
+ const legacy={...q};delete legacy.ownershipPolicy;assert.throws(()=>verifyGuardReceipts(legacy,versions,events,{now}));const oldEvents=structuredClone(events);for(const e of oldEvents){const tick=JSON.parse(e.logs[0].message[0]);delete tick.ownershipPolicy;e.logs[0].message[0]=JSON.stringify(tick);}const oldProof=verifyGuardReceipts(legacy,versions,oldEvents,{now});assert.equal('ownershipPolicy'in oldProof,false);assert.equal('ownershipPolicy'in oldProof.guards.primary,false);assert.throws(()=>verifyGuardReceipts(q,versions,oldEvents,{now}));
+});

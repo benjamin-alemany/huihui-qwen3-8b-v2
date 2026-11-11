@@ -58,6 +58,18 @@ test('lost permit acknowledgement retains exact intent and recovers only matchin
 test('identical validated permits retry without resetting the immutable deadline or changing payload',async()=>{
  const h=setup();let posts=0;const original=h.fetch;h.fetch=async(url,opt)=>{if(url.endsWith('/allow-model')){posts++;h.calls.push({type:'host',url,opt});return Response.json({version:1,status:'permitted',...JSON.parse(opt.body)});}return original(url,opt);};const verify=h.make();assert.equal(await h.invoke(verify),false);assert.equal(await h.invoke(verify),false);const bodies=h.calls.filter(c=>c.opt?.body).map(c=>c.opt.body);assert.equal(posts,2);assert.equal(bodies[0],bodies[1]);assert.equal((await h.storage.get(MARKER+h.session.id)).identity.deadline,h.session.deadline);
 });
+test('mixed V2 create/list/GET UTC forms preserve the same permit identity across retries and readiness',async()=>{
+ const h=setup(),verify=h.make(),original=new Date(NOW).toISOString();
+ await h.storage.put('session-ledger-v1',{session:h.session});
+ // The durable create observation has Z, while subsequent list/GET responses
+ // use the provider's naive UTC wire form and an equivalent explicit offset.
+ h.allocation.createdAt=original.slice(0,-1);
+ assert.equal(await h.invoke(verify),false);const first=await h.storage.get(MARKER+h.session.id);assert.equal(first.identity.allocationCreatedAt,original);
+ const bodies=()=>h.calls.filter(c=>c.opt?.body).map(c=>c.opt.body);
+ h.allocation.createdAt='2026-11-10T07:00:00-05:00';assert.equal(await h.invoke(verify),false);assert.deepEqual(bodies(),[bodies()[0],bodies()[0]]);assert.deepEqual((await h.storage.get(MARKER+h.session.id)).identity,first.identity);
+ h.stage='ready';h.allocation.createdAt=original;assert.equal(await h.invoke(verify),true);assert.deepEqual((await h.storage.get(MARKER+h.session.id)).identity,first.identity);assert.equal((await h.storage.get('session-ledger-v1')).session.knownAllocations[0].createdAt,original);
+ const callCount=h.calls.length;h.allocation.createdAt=new Date(NOW+1).toISOString();assert.equal(await h.invoke(verify),false);assert.equal(h.calls.length,callCount);assert.deepEqual((await h.storage.get(MARKER+h.session.id)).identity,first.identity);
+});
 test('changed gateway pins or contradictory ACK cannot produce ready state',async()=>{
  for(const bad of ['bundle','ack']){
   const h=setup(),original=h.fetch;h.fetch=async(url,opt)=>{if(bad==='bundle'&&url.endsWith('/host-ready')){h.calls.push({type:'host'});return Response.json({...h.receipt(),bootstrapBundleSha256:'d'.repeat(64)});}if(bad==='ack'&&url.endsWith('/allow-model')){h.calls.push({type:'host'});return Response.json({version:1,status:'permitted',...JSON.parse(opt.body),deadlineUTC:new Date(h.session.deadline+1000).toISOString()});}return original(url,opt);};assert.equal(await h.invoke(h.make()),false);const m=await h.storage.get(MARKER+h.session.id);assert(bad==='bundle'?m===undefined:m.phase==='permit-requested');

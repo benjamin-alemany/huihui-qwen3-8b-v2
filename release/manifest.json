@@ -19,6 +19,7 @@
   },
   "hosting": {
     "provider": "hyperstack",
+    "ownershipPolicy": "nonce-name-v2",
     "flavor": "n3-RTX-A6000x1",
     "region": "CANADA-1",
     "vmImageId": 574,

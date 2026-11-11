@@ -2,20 +2,27 @@
 
 ## Goal and current state
 
-Implement the approved private-chat product plan. The canonical code is this reviewed branch; current facts are in PROJECT-STATUS.md and CUDA-DRIVER-RUNPOD-FINDINGS.md. The existing Cloudflare interface/controller are deployed with inference and paid Start locked. Earlier functional GPU chat does not establish readiness for the newer network boundary. The exact offline image failed native CUDA; its release pin remains null.
+Implement the approved private-chat product plan: pinned Qwen, owner-confirmed timed sessions, durable cloud chats/replies, draft recovery and manual backup/restore without a laptop dependency. Current facts are in `PROJECT-STATUS.md`; historical Runpod CUDA findings are in `CUDA-DRIVER-RUNPOD-FINDINGS.md`. Full workstation and agent execution remain phase two.
 
-The selected next inference host is a Hyperstack A6000 VM, subject to the account-access/price/stock/permissions/image gate. No VM or funding is authorized by this document. Provider-independent autosave and repeat-session work can proceed free; do not build around an unverified provider or initiate another Runpod compatibility experiment.
+The existing Cloudflare interface/controller and shutdown resources are deployed with paid Start, guard arming, inference, ordinary allowance and agent tools off. Both source release approval pins are null. The single approved Hyperstack A6000 attempt failed the provider identity readback gate because optional requested labels returned empty. No model permit was issued; CUDA and Qwen remain untested on this target. The exact allocation was manually deleted and operator-specific controller/guard cloud reconciliation verified. Retain that truthful created/deleted failure record; never recast it as no-create or a successful acceptance.
+
+The prepared V2 candidate uses a versioned protocol: `nonce-name-v2` binds the full random nonce-bearing name, exact target and UTC window, then retains durable allocation IDs. Legacy reservations without the field keep the original strict V1 label predicate. Each actual guard must explicitly prove the V2 policy and its current Worker version for the exact reservation before paid creation. Neither a version ID alone nor a historical V1 record is sufficient. The ownership repair leaves VM/bootstrap/model artifacts unchanged and does not establish native compatibility.
+
+No paid retry is authorized. Continue bounded free source preparation and review; a new native allocation requires a fresh quoted plan and explicit approval. Do not restart the former Runpod compatibility experiments.
 
 Free code changes do not authorize credit purchases, subscriptions, auto-pay, paid resources, production unlocks or agent execution. Paid acceptance and provider funding retain their separate explicit approval requirements. The owner must complete account/legal/payment actions. Keep all real credentials out of this development checkout and all public evidence.
 
 ## Repository map
 
 - Root Docker recipes and `chat/`: the existing inference-image project.
-- `cloudflare-backup/chat/site/`: browser UI, manual saved chats, quote/consent/Start/Stop.
+- `cloudflare-backup/chat/site/`: browser UI, autosave/draft recovery, backups and quote/consent/Start/Stop.
 - `cloudflare-backup/chat/worker.mjs`: owner authentication, CSRF, history and inference gateway.
 - `cloudflare-backup/chat/controller/engine.mjs`: durable lifecycle, budget and single-create logic.
 - `cloudflare-backup/chat/controller/guard.mjs`: independent per-guard reservation stores.
-- `cloudflare-backup/chat/validation/stop.mjs`: the reused fixed-deadline STOP core.
+- `cloudflare-backup/chat/hyperstack/`: versioned ownership, provider API, destroy guards and host/firewall handshake.
+- `vm/`: the prepared native VM boundary/bootstrap/runtime; target GPU acceptance remains outstanding.
+- `release/`: pinned candidate artifacts and separate closed source approval gates.
+- `cloudflare-backup/chat/validation/stop.mjs`: historical Runpod fixed-deadline STOP core.
 - `cloudflare-backup/chat/controller/receipts.mjs` and `tails.mjs`: strict current-version cron proof.
 - `cloudflare-backup/workstation/auth.mjs`: signed owner JWT verification.
 
@@ -45,16 +52,20 @@ See `docs/TESTING-AND-RECOVERY.md` for the hardened workflow. Run
 Setup and test phases are separate. Neither phase deploys, downloads a model or
 starts a GPU. Review dependency/runtime risks before executing untrusted changes.
 
-The production-source suite also replayed private real tail exports. In this
+Latest local evidence: 264 Node, 25 chat, 17 controller and 20 guard checks passed; 59 Python tests ran with one skip. These CPU/dummy results do not validate the target VM or release the product.
+
+The earlier production-source suite also replayed private real tail exports. In this
 public copy that one fixture case uses sanitized scheduled-tail data, so it is
 not a new live transport validation.
 
-## First bounded Dot assignment
+## Next bounded review
 
-Independently review the session controller for duplicate creates, budget resets,
-crash/restart races, receipt bypasses, Stop races, credential disclosure and false
-cleanup success. Reproduce concrete findings with dummy tests. Prepare patches
-on a branch for review and report only material findings, failures or required
+Review the V2 ownership/receipt path for duplicate creates, V1 reinterpretation,
+budget resets, crash/restart races, feature-proof bypasses, Stop races, credential
+disclosure and false cleanup success. Preserve truthful empty-label evidence and
+operator recovery history. Reproduce concrete findings with dummy tests; repeat
+existing successful checks only when a relevant change or failure justifies it.
+Prepare patches on a branch for review and report only material findings, failures or required
 owner action. Stop after the review deliverable; do not keep changing code to
 stay busy, schedule recurring work, deploy, or request extra credentials.
 

@@ -15,6 +15,7 @@ export function matchesReleasePin(release,pin){
   pin.bootstrapBundleSize===release.artifact?.bootstrapBundleSize&&Number.isSafeInteger(pin.bootstrapBundleSize)&&pin.bootstrapBundleSize>0&&pin.bootstrapBundleSize<=262144&&
   pin.runtimeOrchestrator==='vm-run-v1'&&pin.runtimeOrchestrator===release.artifact?.runtimeOrchestrator&&
   pin.vmImageId===release.hosting?.vmImageId&&Number.isSafeInteger(pin.vmImageId)&&pin.vmImageId>0&&
+  pin.ownershipPolicy==='nonce-name-v2'&&pin.ownershipPolicy===release.hosting?.ownershipPolicy&&
   pin.runtimeProfile==='vm-inference-v1'&&pin.runtimeProfile===release.artifact?.runtimeProfile);
 }
 export function releaseApprovedFor(mode,release=manifest){

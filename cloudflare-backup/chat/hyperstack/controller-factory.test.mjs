@@ -74,6 +74,12 @@ test('health uses only fixed host gateway route and outer key, never model/provi
  assert.equal(await verify({allocation:p,origin:TARGET.inferenceOrigin,inferenceKey:OUTER_KEY}),true);assert.equal(calls[0].url,'https://inference.unjailed.work/__unjailed/host-ready');assert.equal(calls[0].opt.headers.Authorization,'Bearer '+OUTER_KEY);assert.equal(calls[0].opt.redirect,'manual');assert(!JSON.stringify(calls).includes(MODEL_KEY));assert(!JSON.stringify(calls).includes(PROVIDER_KEY));
  assert.equal(await verify({allocation:p,origin:'https://evil.invalid',inferenceKey:OUTER_KEY}),false);assert.equal(await verify({allocation:p,origin:TARGET.inferenceOrigin,inferenceKey:MODEL_KEY}),false);assert.equal(calls.length,1);
 });
+test('host health accepts equivalent V2 UTC wire forms and refuses a genuinely different creation instant',async()=>{
+ const {store,r,s,p,lifecycle}=prepared(),calls=[];s.phase='ready';await store.put('session-ledger-v1',{session:s});
+ const verify=boundHealthVerifier({storage:store,target:TARGET,release:r,lifecycle,now:()=>NOW,fetchImpl:async(url,opt)=>{calls.push({url,opt});return Response.json(receipt(s,r));}});
+ for(const createdAt of [new Date(NOW).toISOString().slice(0,-1),'2026-11-10T07:00:00-05:00',new Date(NOW).toISOString()])assert.equal(await verify({allocation:{...p,createdAt},origin:TARGET.inferenceOrigin,inferenceKey:OUTER_KEY}),true);
+ const before=calls.length;assert.equal(await verify({allocation:{...p,createdAt:new Date(NOW+1).toISOString()},origin:TARGET.inferenceOrigin,inferenceKey:OUTER_KEY}),false);assert.equal(calls.length,before);assert.equal((await store.get('session-ledger-v1')).session.knownAllocations[0].createdAt,p.createdAt);
+});
 test('Stop or an unknown allocation during host-health work cannot reopen inference',async()=>{
  const {store,r,s,p,lifecycle}=prepared();
  const verify=boundHealthVerifier({storage:store,target:TARGET,release:r,lifecycle,now:()=>NOW,fetchImpl:async()=>{await store.put('session-ledger-v1',{session:{...s,stopRequested:true}});return Response.json(receipt(s,r));}});
