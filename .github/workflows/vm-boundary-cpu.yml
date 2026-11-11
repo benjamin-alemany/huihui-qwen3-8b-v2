@@ -1,0 +1,53 @@
+name: VM driver bootstrap and host boundary CPU verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: unjailed-vm-boundary-cpu
+  cancel-in-progress: false
+jobs:
+  docker-boundary:
+    # Public CPU runner and anonymous pull of the existing small pinned base.
+    # Build RUN steps and the fixture container have no network. No GPU/model,
+    # publishing credentials, registry push, artifacts or cache are used.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify actual Docker readonly credential and namespace boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin python3 -I -B vm/docker_fixture.py
+  verify:
+    # Free standard public-repository runner only. No provider/GPU access,
+    # model downloads, registry publication, caches or artifacts.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Portable package-lock and immutable bootstrap checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -i PATH=/usr/bin:/bin python3 -I -B vm/test_vm.py
+          bash -n vm/linux_fixture.sh
+          sh -n vm/attach_model_network.sh
+      - name: Require reviewed distribution tools for dummy namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get -o APT::Get::AllowUnauthenticated=false update
+          sudo apt-get -o APT::Get::AllowUnauthenticated=false install --no-install-recommends --yes nftables iproute2 libseccomp2 util-linux
+      - name: Attack isolated host boundary with dummy network peers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin timeout 90s bash vm/linux_fixture.sh

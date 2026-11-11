@@ -1,0 +1,15 @@
+**
+!chat/
+!vm/
+!chat/credential_boot.py
+!chat/credential_boundary.py
+!chat/offline_cache.py
+!start.py
+!vm/boot.py
+!vm/cpu_child.py
+!vm/inference_policy.py
+!vm/image_setup.py
+!vm/dummy_cache.py
+!vm/attestation.py
+!vm/host_policy.py
+!vm/Dockerfile.cpu

@@ -1,0 +1,18 @@
+[Unit]
+Description=Host-side private inference tunnel
+Requires=unjailed-boundary.service
+After=unjailed-boundary.service
+[Service]
+User=10002
+Group=10002
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 --config /etc/unjailed/tunnel.yml run
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+BindReadOnlyPaths=/etc/unjailed/tunnel-resolv.conf:/etc/resolv.conf
+PrivateDevices=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Restart=no
+UMask=0077

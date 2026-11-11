@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "platform": "ubuntu24.04-amd64",
+  "driver_branch": "580",
+  "driver_version": "580.196.07",
+  "repositories": {
+    "cuda": {
+      "base": "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/",
+      "index": "Packages.gz",
+      "algorithm": "sha256",
+      "fingerprint": "EB693B3035CD5710E231E123A4B469963BF863CC",
+      "inrelease_sha256": "b001bd743a9b2e99cf53872e8dc8d680715e9751c97f901a44d95ed1c647edf8",
+      "index_digest": "5a0bc35e09386631deea9354f049b58463519537108f8f6d60e532d9b423294f",
+      "index_bytes": 2062380,
+      "key_sha256": "25100d6f2eccaee7d6719a70e3c0c6145064aa9edc2c32148f693ac4c524a376"
+    },
+    "toolkit": {
+      "base": "https://nvidia.github.io/libnvidia-container/stable/deb/amd64/",
+      "index": "Packages",
+      "algorithm": "sha512",
+      "fingerprint": "C95B321B61E88C1809C4F759DDCAE044F796ECB0",
+      "inrelease_sha256": "e66588cb0c60596cf2546bbb335f2dcfc2aef15861cce3d109d7745c62b95951",
+      "index_digest": "953a39d6a5e9b11e42bdf304c04e9c3c5d7b9409c3f9b4c21f4604520670f20c9d940c7dfe9f7f4a6b4cfebe3d511c1652ffc9f89830ff59d0a54aa41d07bb49",
+      "index_bytes": 184684,
+      "key_sha256": "425822bb25bfa7f5ce96e598a7bbd27db128649e4113017b3ff765b98b43b166"
+    },
+    "docker": {
+      "base": "https://download.docker.com/linux/ubuntu/",
+      "release_base": "https://download.docker.com/linux/ubuntu/dists/noble/",
+      "index": "stable/binary-amd64/Packages.gz",
+      "algorithm": "sha256",
+      "fingerprint": "9DC858229FC7DD38854AE2D88D81803C0EBFCD88",
+      "inrelease_sha256": "6ac25b6892e468c29d0822d6422efe16a63ad6155d1186c85006e0e92f486362",
+      "index_digest": "87dc5b8fb46bd532629a9a5032bc728146a37288617eff764b62506cdf1fa793",
+      "index_bytes": 88531,
+      "key_sha256": "a09e26b72228e330d55bf134b8eaca57365ef44bf70b8e27c5f55ea87a8b05e2"
+    }
+  },
+  "packages": [
+    {
+      "repository": "cuda",
+      "name": "dkms",
+      "version": "1:3.4.4-1ubuntu1",
+      "architecture": "all",
+      "filename": "./dkms_3.4.4-1ubuntu1_all.deb",
+      "sha256": "a060b3de7237bef1081355aa22725557bffd5a1d765b0c45b3ff8dcfb31fa96e",
+      "size": 57520
+    },
+    {
+      "repository": "cuda",
+      "name": "libnvidia-compute-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./libnvidia-compute-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "b6a5b9a94267d1995a2bd54e7a9876961f3efb6928edbbcce675d09ea9cb2c8d",
+      "size": 54671338
+    },
+    {
+      "repository": "cuda",
+      "name": "libnvidia-cfg1-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./libnvidia-cfg1-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "c8b62c6509aea9e51e17a2d0184598fd5945bf4c659ba8a99366b873b98ca17d",
+      "size": 147818
+    },
+    {
+      "repository": "cuda",
+      "name": "libnvidia-common-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "all",
+      "filename": "./libnvidia-common-580_580.196.07-1ubuntu1_all.deb",
+      "sha256": "966c27839c847fa14b2b695a003e255e170950e7dba67f552a7743a2dfed00ca",
+      "size": 12174
+    },
+    {
+      "repository": "cuda",
+      "name": "libnvidia-decode-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./libnvidia-decode-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "572e491c691f231623fd0a552516cb17ad0bca1cf1dbd7ac9985d7c753f3bd4b",
+      "size": 2724296
+    },
+    {
+      "repository": "cuda",
+      "name": "libnvidia-gpucomp-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./libnvidia-gpucomp-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "4034f539ba63867c6dc5a3b0069c3c77c6abe5393900954ef461c4fb136494ee",
+      "size": 18502184
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-dkms-580-open",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-dkms-580-open_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "fd348c30ad1cb12db519e0be40c9637d675df5f55eca38661bee70db63ce206e",
+      "size": 15306
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-kernel-common-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-kernel-common-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "0b5b3df398018d1f6e6dd903baf2e018094ddb66df4b3d1b7c36dabf9a33cd7e",
+      "size": 716448
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-kernel-source-580-open",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-kernel-source-580-open_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "500915ba5ea32d4ab8b2256f9cb7fa8006503d7e391f846245c9c8d1f7259840",
+      "size": 7994466
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-firmware-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-firmware-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "8595f10092f341ee973d4efeab612161c4527c3e8d35bd64d5764fdf6d3244fb",
+      "size": 74788940
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-modprobe",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-modprobe_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "724830b72112b34352dc9b7c4ab0f67b663cc9fd8f53ea205fe5230be27007ff",
+      "size": 15674
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-persistenced",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-persistenced_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "cf83d1ee78b99d061264f786dce0ae97d5431f68a7fe505589452055a32bf492",
+      "size": 24456
+    },
+    {
+      "repository": "cuda",
+      "name": "nvidia-utils-580",
+      "version": "580.196.07-1ubuntu1",
+      "architecture": "amd64",
+      "filename": "./nvidia-utils-580_580.196.07-1ubuntu1_amd64.deb",
+      "sha256": "9344e6dfbe6b89c54e12dd00a66e6b03e430de5083a6742c329ed385414befef",
+      "size": 12154
+    },
+    {
+      "repository": "toolkit",
+      "name": "nvidia-container-toolkit",
+      "version": "1.20.2-1",
+      "architecture": "amd64",
+      "filename": "./nvidia-container-toolkit_1.20.2-1_amd64.deb",
+      "sha256": "3ea74794dc7fd88526da6fece9fb142e976efac232892fa4c870a96a9708316b",
+      "size": 1531284
+    },
+    {
+      "repository": "toolkit",
+      "name": "nvidia-container-toolkit-base",
+      "version": "1.20.2-1",
+      "architecture": "amd64",
+      "filename": "./nvidia-container-toolkit-base_1.20.2-1_amd64.deb",
+      "sha256": "a6bd7f3a94b0b53b9748872709e70e810473081de0e836a59405073012c49368",
+      "size": 6002004
+    },
+    {
+      "repository": "toolkit",
+      "name": "libnvidia-container-tools",
+      "version": "1.20.2-1",
+      "architecture": "amd64",
+      "filename": "./libnvidia-container-tools_1.20.2-1_amd64.deb",
+      "sha256": "a0ded4571083019155661eb53b5fd967d9b83bf7c68516d7e6f489c80caf6946",
+      "size": 20808
+    },
+    {
+      "repository": "toolkit",
+      "name": "libnvidia-container1",
+      "version": "1.20.2-1",
+      "architecture": "amd64",
+      "filename": "./libnvidia-container1_1.20.2-1_amd64.deb",
+      "sha256": "466e48e38325bd72ebda9d91653c36f44e71ef9bc261f949689132c892835a4b",
+      "size": 1237564
+    },
+    {
+      "repository": "docker",
+      "name": "docker-ce",
+      "version": "5:29.9.3-1~ubuntu.24.04~noble",
+      "architecture": "amd64",
+      "filename": "dists/noble/pool/stable/amd64/docker-ce_29.9.3-1~ubuntu.24.04~noble_amd64.deb",
+      "sha256": "c546181f0bc5f1d19085d764a3219aa86069468dbee4743fae420ee8a31809a4",
+      "size": 24586336
+    },
+    {
+      "repository": "docker",
+      "name": "docker-ce-cli",
+      "version": "5:29.9.3-1~ubuntu.24.04~noble",
+      "architecture": "amd64",
+      "filename": "dists/noble/pool/stable/amd64/docker-ce-cli_29.9.3-1~ubuntu.24.04~noble_amd64.deb",
+      "sha256": "24f78a893cece8d345c4e90b5163907c047b996b747265f873743e8b0b0546d4",
+      "size": 17584604
+    },
+    {
+      "repository": "docker",
+      "name": "containerd.io",
+      "version": "2.4.2-3~ubuntu.24.04~noble",
+      "architecture": "amd64",
+      "filename": "dists/noble/pool/stable/amd64/containerd.io_2.4.2-3~ubuntu.24.04~noble_amd64.deb",
+      "sha256": "f811ab57d1f4bb0cce19df7d526da8c711d8ebea0447cc83da1999188e664122",
+      "size": 23271468
+    }
+  ],
+  "verified_metadata_only": true,
+  "package_payloads_downloaded": false,
+  "target_vm_validated": false
+}

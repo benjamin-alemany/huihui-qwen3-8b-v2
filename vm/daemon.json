@@ -1,0 +1,1 @@
+{"hosts":["unix:///var/run/docker.sock"],"iptables":false,"ip6tables":false,"ip-forward":false,"userland-proxy":false,"live-restore":false,"bridge":"none","log-driver":"local","log-opts":{"max-size":"10m","max-file":"2"}}
