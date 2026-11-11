@@ -1,6 +1,8 @@
 import {it,expect,vi} from 'vitest';import {env,exports} from 'cloudflare:workers';
 import {runInDurableObject} from 'cloudflare:test';
 import {IMAGE,GPU,reservation} from '../session-policy.mjs';import {providerFixture} from './provider-fixture.mjs';
+import guardWorker from '../guard.mjs';
+import {TARGET as HYPER_TARGET,fixture as hyperFixture,rawVM} from '../../hyperstack/fixtures.mjs';
 it('unarmed guards are keyless and make no provider request; public access is absent',async()=>{
  const stub=env.STOP_RESERVATION.getByName(crypto.randomUUID());const spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
  try{expect((await stub.tick()).status).toBe('unarmed');expect((await stub.report()).armed).toBe(false);expect(spy).not.toHaveBeenCalled();expect((await exports.default.fetch(new Request('https://dummy.test/'))).status).toBe(404);}finally{spy.mockRestore();}
@@ -136,4 +138,59 @@ it('rearming the same nonce cannot change its bound duration or creation window'
   }
  });
  expect((await stub.report()).image).toBe(q.image);await stub.disarm(q.name);
+});
+
+const hyperKey='DUMMY_HYPERSTACK_KEY_NO_VM_ACCESS';
+function hyperReservation(){
+ const start=Date.now(),nonce=crypto.randomUUID().replaceAll('-','');
+ return {kind:'chat',provider:'hyperstack',minutes:30,image:IMAGE,name:'unjailed-chat-'+nonce,nonce,target:HYPER_TARGET,
+  createdNotBefore:start,createdNotAfter:start+300000,deadline:start+1800000,windowStart:new Date(start).toISOString(),windowEnd:new Date(start+300000).toISOString()};
+}
+async function hyperStub(patch={}){
+ const stub=env.STOP_RESERVATION.getByName(crypto.randomUUID());
+ await runInDurableObject(stub,instance=>{instance.env={...instance.env,HOSTING_PROVIDER:'hyperstack',HYPERSTACK_TARGET_JSON:JSON.stringify(HYPER_TARGET),...patch};});
+ return stub;
+}
+const rejected=async(stub,fn)=>runInDurableObject(stub,async instance=>{try{await fn(instance);return false;}catch{return true;}});
+it('Hyperstack unarmed actual DO makes zero HTTP requests and cannot expose a public endpoint',async()=>{
+ const stub=await hyperStub(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{expect((await stub.tick()).status).toBe('unarmed');expect((await stub.report()).armed).toBe(false);expect(spy).not.toHaveBeenCalled();expect((await exports.default.fetch(new Request('https://dummy.test/'))).status).toBe(404);}finally{spy.mockRestore();}
+});
+it('Hyperstack invalid target and disabled arm refuse without falling back to Runpod',async()=>{
+ const q=hyperReservation(),stub=await hyperStub({HYPERSTACK_TARGET_JSON:'{"environmentId":11}'}),locked=await hyperStub({GUARD_ARM_ENABLED:'false'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{expect(await rejected(stub,i=>i.arm({reservation:q,key:hyperKey}))).toBe(true);expect(await rejected(stub,i=>i.tick())).toBe(true);expect(await rejected(locked,i=>i.arm({reservation:q,key:hyperKey}))).toBe(true);expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
+});
+it('Hyperstack guard persists its own secret and requires trusted fresh no-create cancellation',async()=>{
+ const stub=await hyperStub(),q=hyperReservation(),f=hyperFixture(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(f.fetch);
+ try{
+  const armed=await stub.arm({reservation:q,key:hyperKey});expect(armed.armed).toBe(true);expect(JSON.stringify(armed)).not.toContain(hyperKey);
+  expect(await rejected(stub,i=>i.disarm(q.name))).toBe(true);
+  await runInDurableObject(stub,async(_,ctx)=>expect(await ctx.storage.get('hyperstack-guard-key-v1')).toBe(hyperKey));
+  const done=await stub.disarm(q.name,{definiteNoCreate:true});expect(done.unarmed).toBe(true);expect(done.armed).toBe(false);expect(JSON.stringify(done)).not.toContain(hyperKey);expect(f.calls.every(c=>c.method==='GET')).toBe(true);
+  await runInDurableObject(stub,async(_,ctx)=>{expect(await ctx.storage.get('hyperstack-guard-key-v1')).toBeUndefined();expect(await ctx.storage.getAlarm()).toBeNull();});
+ }finally{spy.mockRestore();}
+});
+it('active provider state blocks both migration directions without losing either guard',async()=>{
+ const stub=await hyperStub(),q=hyperReservation(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{
+  await runInDurableObject(stub,async(_,ctx)=>ctx.storage.put('active',{reservation:{name:'legacy-live'},key:'DUMMY_LEGACY_KEY'}));
+  expect(await rejected(stub,i=>i.arm({reservation:q,key:hyperKey}))).toBe(true);expect(await rejected(stub,i=>i.tick())).toBe(true);
+  await runInDurableObject(stub,async(instance,ctx)=>{expect((await ctx.storage.get('active')).key).toBe('DUMMY_LEGACY_KEY');await ctx.storage.delete('active');});
+  await stub.arm({reservation:q,key:hyperKey});
+  await runInDurableObject(stub,instance=>{instance.env={...instance.env,HOSTING_PROVIDER:'runpod'};});
+  expect(await rejected(stub,i=>i.arm({reservation:reservation(Date.now(),'f'.repeat(32)),key:'DUMMY_CONTROL_KEY'}))).toBe(true);expect(await rejected(stub,i=>i.tick())).toBe(true);expect(await rejected(stub,i=>i.report())).toBe(true);
+  await runInDurableObject(stub,async(instance,ctx)=>{expect(await ctx.storage.get('hyperstack-guard-key-v1')).toBe(hyperKey);await ctx.storage.deleteAlarm();await ctx.storage.deleteAll();});
+  expect(spy).not.toHaveBeenCalled();
+ }finally{spy.mockRestore();}
+});
+it('Hyperstack scheduled proof is emitted only for the exact waiting reservation, never Stop or a bound VM',async()=>{
+ const stub=await hyperStub(),q=hyperReservation(),f=hyperFixture(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(f.fetch),logs=vi.spyOn(console,'log').mockImplementation(()=>{});
+ const workerEnv={...env,HOSTING_PROVIDER:'hyperstack',CHAT_STOP_ROLE:'primary',STOP_RESERVATION:{getByName:()=>stub}};
+ try{
+  await stub.arm({reservation:q,key:hyperKey});await guardWorker.scheduled(null,workerEnv);
+  const waiting=JSON.parse(logs.mock.calls.at(-1)[0]);expect(waiting).toMatchObject({event:'guard_tick',provider:'hyperstack',status:'waiting-for-reserved-vm',name:q.name,reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,expiry:q.deadline});expect(JSON.stringify(waiting)).not.toContain(hyperKey);
+  f.vms.push(rawVM({name:q.name,created_at:new Date(q.createdNotBefore).toISOString(),labels:['unjailed:'+q.nonce]}));await guardWorker.scheduled(null,workerEnv);expect(JSON.parse(logs.mock.calls.at(-1)[0]).status).not.toBe('waiting-for-reserved-vm');
+  await stub.shorten(q.name,Date.now());await guardWorker.scheduled(null,workerEnv);expect(JSON.parse(logs.mock.calls.at(-1)[0]).status).not.toBe('waiting-for-reserved-vm');
+  await stub.disarm(q.name);expect((await stub.report()).armed).toBe(false);
+ }finally{spy.mockRestore();logs.mockRestore();}
 });

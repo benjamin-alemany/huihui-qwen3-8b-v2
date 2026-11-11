@@ -209,6 +209,13 @@ test('healthy cold start after minute twelve retains its original automatic dead
 
 const grantId=n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
 async function ordinary(allowance=2){const h=harness();h.deps.validationMode=false;h.deps.approval='';if(allowance)await h.engine().grant({grantId:grantId(1),amountUSD:allowance});return h;}
+test('acceptance refuses ordinary grants without writing funds or replay markers; ordinary mode remains available',async()=>{
+ const h=harness(),grant={grantId:grantId(9),amountUSD:1},before=await h.engine().status();
+ await assert.rejects(h.engine().grant(grant),e=>e.code==='ORDINARY_ALLOWANCE_DISABLED_DURING_ACCEPTANCE');
+ const after=await h.engine().status();assert.deepEqual(after.ordinaryBudget,before.ordinaryBudget);assert.deepEqual(after.testBudget,before.testBudget);assert.equal(after.ordinaryBudget.capUSD,0);assert.equal(await h.store.get('ordinary-grant-v1:'+grant.grantId),undefined);assert.equal(h.creates,0);
+ h.deps.validationMode=false;const ordinary=await h.engine().grant(grant);assert.equal(ordinary.ordinaryBudget.capUSD,1);assert.deepEqual(ordinary.testBudget,before.testBudget);
+ h.deps.validationMode=true;await assert.rejects(h.engine().grant(grant),e=>e.code==='ORDINARY_ALLOWANCE_DISABLED_DURING_ACCEPTANCE');assert.equal((await h.engine().status()).ordinaryBudget.capUSD,1);
+});
 test('ordinary allowance is zero by default and cannot consume historical test funds',async()=>{
  const h=await ordinary(0),before=structuredClone((await h.engine().read()).ledger),q=await h.engine().quote();
  assert.equal(q.minutes,30);assert.equal(q.maximumUSD,.35);assert.equal(q.ordinaryBudget.remainingUSD,0);assert.equal(q.launchEnabled,false);

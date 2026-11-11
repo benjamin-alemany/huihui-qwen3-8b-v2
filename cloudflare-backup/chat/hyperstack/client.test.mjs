@@ -1,0 +1,71 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {hyperstackClient,CreateError} from './client.mjs';
+import {validateCatalog,normalizeVM,matchesReservation,assertBound} from './policy.mjs';
+import {NOW,TARGET,RESERVATION,rawVM,catalogRaw,fixture} from './fixtures.mjs';
+const KEY='DUMMY_PROVIDER_KEY_NOT_A_REAL_SECRET';
+const client=(s,extra={})=>hyperstackClient(KEY,{target:TARGET,fetchImpl:s.fetch,now:()=>NOW,bootstrapFor:async()=> '#cloud-config\nruncmd: []\n',...extra});
+test('catalog uses exact authenticated schemas and returns metadata only',async()=>{
+ const s=fixture(),c=client(s),q=await c.catalog();assert.equal(q.totalHourlyUSD,.50672043);assert.equal(q.catalogVerified,true);assert.equal(q.runtimeVerified,false);assert.equal(q.permissionsVerified,false);assert.equal(q.target.imageId,33);
+ assert.equal(s.calls.length,6);assert(s.calls.every(x=>x.method==='GET'&&x.headers.api_key===KEY));assert(!JSON.stringify(q).includes('DUMMY_PUBLIC_KEY'));
+});
+test('catalog fails closed on B300-only image restrictions, warnings, missing metadata and zero stock',()=>{
+ for(const mutate of [r=>{r.images.images[0].images[0].flavor_restrictions={has_flavor_restrictions:true,restriction_type:'hard',compatible_flavors:[{flavor_id:999,link_type:'hard',constraints:{}}]};},r=>{r.flavors.data[0].flavors[0].image_restrictions.restriction_type='soft';r.flavors.data[0].flavors[0].image_restrictions.has_image_restrictions=true;},r=>{delete r.images.images[0].images[0].flavor_restrictions;},r=>{r.stocks.stocks[0].models[0].configurations['1x']=0;}]){const r=catalogRaw();mutate(r);assert.throws(()=>validateCatalog(r,TARGET,NOW));}
+});
+test('catalog rejects unquoted charges, expiring rates, malformed or ambiguous prices',()=>{
+ for(const mutate of [r=>{r.pricebook[0].value='1';},r=>{r.pricebook[2].value='.01';},r=>{r.pricebook[0].value='NaN';},r=>{r.pricebook.push({...r.pricebook[0]});},r=>{r.pricebook[0].end_time=new Date(NOW+60_000).toISOString();}]){const r=catalogRaw();mutate(r);assert.throws(()=>validateCatalog(r,TARGET,NOW));}
+});
+test('normalized readbacks cannot reflect user_data, API secrets, image ID or artifact proof',()=>{
+ const p=normalizeVM(rawVM());assert.equal(p.bootImageName,TARGET.imageName);assert.equal(p.artifactVerified,false);assert.equal(p.publicIp,'192.0.2.44');assert(!JSON.stringify(p).includes('DUMMY_SECRET'));assert(!('imageId' in p));assert(!('raw' in p));assert(matchesReservation(p,RESERVATION));
+});
+test('ownership binds exact nonce/name/tag/time/target then retains immutable IDs after rename',()=>{
+ const p=normalizeVM(rawVM());for(const delta of [{name:'other'},{labels:[]},{createdAt:new Date(NOW-10_000).toISOString()},{environment:{...p.environment,id:12}},{flavor:{...p.flavor,count:2}}])assert.equal(matchesReservation({...p,...delta},RESERVATION),false);
+ assert.equal(assertBound({...p,name:'renamed',labels:[]},p,RESERVATION).id,p.id);assert.throws(()=>assertBound({...p,createdAt:new Date(NOW+1).toISOString()},p,RESERVATION));assert.throws(()=>assertBound({...p,id:'999'},p,RESERVATION));
+});
+test('create sends one constrained body and never places provider key in VM bootstrap',async()=>{
+ const s=fixture(),c=client(s),p=await c.create(RESERVATION);assert.equal(p.id,'44');const post=s.calls.find(x=>x.method==='POST');assert.deepEqual(Object.keys(post.body).sort(),['assign_floating_ip','count','create_bootable_volume','enable_port_randomization','environment_name','flavor_name','image_id','key_name','labels','name','security_rules','user_data'].sort());assert.equal(post.body.count,1);assert.equal(post.body.create_bootable_volume,false);assert.deepEqual(post.body.security_rules,[]);assert(!JSON.stringify(post.body).includes(KEY));
+ await assert.rejects(c.create(RESERVATION),e=>e.outcome==='unknown');assert.equal(s.calls.filter(x=>x.method==='POST').length,1);
+});
+test('simultaneous create calls cannot race the local single-attempt marker',async()=>{
+ const s=fixture();let resolve;const wait=new Promise(r=>resolve=r);const c=client(s,{bootstrapFor:async()=>{await wait;return '#cloud-config';}});const a=c.create(RESERVATION),b=c.create(RESERVATION);await assert.rejects(b,e=>e.outcome==='unknown');resolve();await a;assert.equal(s.calls.filter(x=>x.method==='POST').length,1);
+});
+test('preflight rejects oversized UTF-8 bootstrap, provider key, expired window and arbitrary target',async()=>{
+ for(const extra of [{bootstrapFor:async()=>KEY},{bootstrapFor:async()=> '🐱'.repeat(13_000)},{now:()=>NOW+70_000}]){const s=fixture();await assert.rejects(client(s,extra).create(RESERVATION),e=>e instanceof CreateError&&e.outcome==='definite-no-create'&&!e.message.includes(KEY));assert.equal(s.calls.length,0);}
+ assert.throws(()=>client(fixture(),{target:{...TARGET,inferenceOrigin:'https://attacker.invalid'}}));
+});
+test('slow bootstrap cannot send a POST after the creation window or deadline expires',async()=>{
+ for(const expired of [RESERVATION.createdNotAfter+1,RESERVATION.deadline]){const s=fixture();let clock=NOW;const c=client(s,{now:()=>clock,bootstrapFor:async()=>{clock=expired;return '#cloud-config';}});await assert.rejects(c.create(RESERVATION),e=>e.outcome==='definite-no-create');assert.equal(s.calls.length,0);}
+});
+test('unknown create outcomes retain ambiguity; documented compatibility rejection is definite',async()=>{
+ for(const mode of ['lost','ambiguous','blocked']){const s=fixture({createMode:mode});await assert.rejects(client(s).create(RESERVATION),e=>e.outcome===(mode==='blocked'?'definite-no-create':'unknown')&&!e.message.includes('DUMMY_SECRET'));assert.equal(s.calls.filter(x=>x.method==='POST').length,1);if(mode==='lost')assert.equal(s.vms.length,1);}
+});
+test('only structured 404 proves absence, auth failure and malformed successful replies never do',async()=>{
+ const s=fixture(),c=client(s);assert.equal(await c.get('44'),null);s.getStatus=401;await assert.rejects(c.get('44'));s.getStatus=500;await assert.rejects(c.get('44'));
+ const bad=client(s,{fetchImpl:async()=>Response.json({status:true,instance:null})});await assert.rejects(bad.get('44'));await assert.rejects(c.get('../billing'));
+});
+test('full inventory pagination rejects partial, repeated and changing-count pages',async()=>{
+ const s=fixture(),c=client(s);s.listHook=()=>Response.json({status:true,page:1,page_size:100,count:2,instances:[rawVM()]});await assert.rejects(c.list());
+ s.listHook=()=>Response.json({status:true,page:null,page_size:null,count:2,instances:[rawVM()]});await assert.rejects(c.list());
+ s.listHook=u=>Response.json({status:true,page:Number(u.searchParams.get('page')),page_size:100,count:101,instances:Array.from({length:100},(_,i)=>rawVM({id:100+i}))});await assert.rejects(c.list());
+});
+test('trusted inventory page hook runs before each request and cannot turn a failed later page into partial success',async()=>{
+ const s=fixture({vms:Array.from({length:101},(_,i)=>rawVM({id:100+i}))}),c=client(s),observed=[];
+ const rows=await c.list({beforePage:async()=>{observed.push(s.calls.length);}});assert.equal(rows.length,101);assert.deepEqual(observed,[0,1]);
+ const failing=fixture({vms:Array.from({length:101},(_,i)=>rawVM({id:100+i}))});let pages=0;
+ await assert.rejects(client(failing).list({beforePage:async()=>{if(++pages===2)throw Error('DUMMY_LEASE_CHANGED');}}),/DUMMY_LEASE_CHANGED/);
+ assert.equal(failing.calls.length,1);
+ const invalid=fixture();await assert.rejects(client(invalid).list({beforePage:'not-a-trusted-function'}),/INVENTORY_OPTIONS_INVALID/);assert.equal(invalid.calls.length,0);
+});
+test('cleanup uses DELETE and fresh absence/inventory; public IP release remains coupled and unsettled',async()=>{
+ const s=fixture({vms:[rawVM(),rawVM({id:45,name:'unrelated',labels:[]})]}),c=client(s),p=await c.get('44'),r=await c.cleanup(p,RESERVATION);assert.equal(r.complete,true);assert.equal(r.vmAbsent,true);assert.equal(r.inventoryAbsent,true);assert.equal(r.publicIpReleaseMode,'vm-coupled');assert.equal(r.independentIpReadback,false);assert.equal(r.standaloneIpAbsence,'unverified');assert.equal(r.billingSettlementPending,true);assert.equal(s.vms[0].id,45);assert.equal(s.calls.filter(x=>x.method==='DELETE').length,1);assert(s.calls.every(x=>!x.path.includes('action')&&!x.path.includes('floatingip')));
+});
+test('DELETE acknowledgement alone, duplicate VM or unexpected volumes cannot complete cleanup',async()=>{
+ const s=fixture({vms:[rawVM()]}),c=client(s),p=await c.get('44');s.deleteWorks=false;assert.equal((await c.cleanup(p,RESERVATION)).complete,false);s.deleteWorks=true;s.vms.push(rawVM({id:46}));assert.equal((await c.cleanup(p,RESERVATION)).complete,false);
+ const v=fixture({vms:[rawVM({volume_attachments:[{id:2,volume:{id:77}}]})]}),vc=client(v),vp=await vc.get('44'),r=await vc.cleanup(vp,RESERVATION);assert.equal(r.vmAbsent,true);assert.equal(r.complete,false);assert.deepEqual(r.unexpectedVolumeIds,['77']);assert(v.calls.every(x=>!x.path.includes('/volumes')));
+});
+test('cleanup refuses unbound unrelated resources and immutable-target changes',async()=>{
+ const s=fixture({vms:[rawVM()]}),c=client(s),p=await c.get('44');await assert.rejects(c.cleanup({...p,name:'unrelated'},RESERVATION));s.vms[0].environment.id=99;await assert.rejects(c.cleanup(p,RESERVATION));assert.equal(s.calls.filter(x=>x.method==='DELETE').length,0);
+});
+test('runtime health is disabled without explicit independent verifier; guard has no create capability',async()=>{
+ const s=fixture(),c=client(s),p=normalizeVM(rawVM());assert.equal(await c.health(p,'DUMMY_INFERENCE_KEY'),false);assert.equal(s.calls.length,0);assert.deepEqual(Object.keys(c.destroyClient()).sort(),['get','list','remove']);let seen;const withVerifier=client(s,{verifyHealth:async v=>{seen=v;return true;}});assert.equal(await withVerifier.health(p,'DUMMY_INFERENCE_KEY'),true);assert.equal(seen.origin,TARGET.inferenceOrigin);assert(!JSON.stringify(seen).includes(KEY));
+});

@@ -8,6 +8,15 @@ export const ORIGINAL_ACCEPTANCE=Object.freeze({capUSD:0.51,spentUSD:0.4,remaini
 export const terminal=s=>!s||['stopped','cancelled','failed'].includes(s.phase);
 export const units=usd=>Math.ceil(usd*SCALE),dollars=n=>n/SCALE;
 export class SessionError extends Error {constructor(code,status=409){super(code);this.code=code;this.status=status;}}
+// Trusted deployment presentation only. This never seeds, reconciles, spends or
+// resets a ledger; the original acceptance allowance remains exactly $0.51.
+export function parseOriginalAcceptance(raw){
+  if(raw===undefined||raw==='')return null;
+  let p;try{if(typeof raw!=='string'||raw.length>1024)throw Error();p=JSON.parse(raw);}catch{throw new SessionError('ORIGINAL_ACCEPTANCE_INVALID',503);}
+  if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).sort().join()!=='capUSD,remainingUSD,spentUSD'||p.capUSD!==0.51||
+    !['spentUSD','remainingUSD'].every(k=>typeof p[k]==='number'&&Number.isFinite(p[k])&&p[k]>=0&&p[k]<=0.51)||Math.abs(p.spentUSD+p.remainingUSD-p.capUSD)>1e-9)throw new SessionError('ORIGINAL_ACCEPTANCE_INVALID',503);
+  return Object.freeze({capUSD:0.51,spentUSD:p.spentUSD,remainingUSD:p.remainingUSD});
+}
 export function catalogFrom(raw){
   if(raw?.id!==GPU||raw.secure!==true||!Number.isFinite(raw.price?.secure)||raw.price.secure<=0)throw new SessionError('CATALOG_INVALID',503);
   const gpuHourly=raw.price.secure,totalHourly=Math.ceil((gpuHourly+0.01)*100)/100;
@@ -44,7 +53,7 @@ export function safeSession(s){
   return {id:s.id,quoteId:s.quoteId,minutes:sessionMinutes(s),phase:s.phase,code:s.code??null,stopRequested:!!s.stopRequested,createdAt:s.pod?.createdAt??null,deadline:s.deadline?new Date(s.deadline).toISOString():null,
     maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted};
 }
-export function budgetView(l){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),originalAcceptance:ORIGINAL_ACCEPTANCE};}
+export function budgetView(l,originalAcceptance=ORIGINAL_ACCEPTANCE){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),originalAcceptance:originalAcceptance===null?null:parseOriginalAcceptance(JSON.stringify(originalAcceptance))};}
 export function ordinaryBudgetView(l){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),grantCount:l.grantCount};}
 export function parseGrant(input){
   if(!input||Array.isArray(input)||Object.keys(input).sort().join()!=='amountUSD,grantId'||typeof input.grantId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.grantId??'')||!Number.isFinite(input.amountUSD)||input.amountUSD<=0||input.amountUSD>MAX_GRANT_USD)throw new SessionError('INVALID_GRANT',400);

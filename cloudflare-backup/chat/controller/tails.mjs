@@ -1,8 +1,7 @@
 import {ACCOUNT,GUARDS,activeVersion,receiptFrom,verifyGuardReceipts} from './receipts.mjs';
-const API=`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/workers/scripts/`;
 const MAX_FRAME_BYTES=65536;
 class TailFailure extends Error {constructor(code){super(code);this.code=code;}}
-export function safeTailFailure(error){return typeof error?.code==='string'&&/^(?:(?:VERSIONS_READ|TAIL_CREATE|TAIL_CONNECT|TAIL_UPGRADE|TAIL_CLEANUP|TOKEN_FORMAT|GUARD_TIMEOUT|GUARD_DEPLOYMENT_CHANGED|TAIL_FRAME|TAIL_SOCKET)(?:_HTTP_\d{3})?|TAIL_SOCKET_CLOSE_\d{4})$/.test(error.code)?error.code:'GUARD_HEARTBEAT_NOT_VERIFIED';}
+export function safeTailFailure(error){return typeof error?.code==='string'&&/^(?:(?:VERSIONS_READ|TAIL_CREATE|TAIL_CONNECT|TAIL_UPGRADE|TAIL_CLEANUP|TOKEN_FORMAT|ACCOUNT_FORMAT|GUARD_TIMEOUT|GUARD_DEPLOYMENT_CHANGED|TAIL_FRAME|TAIL_SOCKET)(?:_HTTP_\d{3})?|TAIL_SOCKET_CLOSE_\d{4})$/.test(error.code)?error.code:'GUARD_HEARTBEAT_NOT_VERIFIED';}
 async function smallJSON(response){
   const reader=response.body?.getReader();if(!reader)throw Error('Missing Cloudflare response');
   let text='',size=0;const decoder=new TextDecoder('utf-8',{fatal:true});
@@ -16,8 +15,10 @@ export function tailURL(raw){
   if(u.protocol!=='wss:'||u.hostname!=='tail.developers.workers.dev'||u.port||u.username||u.password||u.hash||u.search||!/^\/[a-f0-9]{32}$/.test(u.pathname))throw Error('Unexpected Cloudflare tail transport');
   u.protocol='https:';return u.toString();
 }
-export function cloudflareTailClient(token,{fetchImpl=fetch}={}){
+export function cloudflareTailClient(token,{accountId=ACCOUNT,fetchImpl=fetch}={}){
+  if(typeof accountId!=='string'||!/^[a-f0-9]{32}$/.test(accountId))throw new TailFailure('ACCOUNT_FORMAT');
   if(typeof token!=='string'||token.length<40||token.length>256||!/^[A-Za-z0-9_-]+$/.test(token))throw new TailFailure('TOKEN_FORMAT');
+  const API=`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/`;
   async function request(worker,suffix,method='GET',body){
     if(!Object.values(GUARDS).includes(worker)||!(/^(deployments|tails(?:\/[a-f0-9]{32})?)$/.test(suffix)))throw Error('Unknown stop guard resource');
     const r=await fetchImpl(API+worker+'/'+suffix,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','User-Agent':'unjailed-session-controller/1.0'},body:body===undefined?undefined:JSON.stringify(body),redirect:'manual',signal:AbortSignal.timeout(10000)});
@@ -57,9 +58,9 @@ function decodeFrame(data){
 // Must run inside an awaited Durable Object alarm, not a browser connection or
 // a short-lived waitUntil. Heartbeat mode checks transport only and NEVER grants
 // permission to create a Pod. Paid launches require an exact reservation.
-export async function collectGuardReadiness(token,reservation,{heartbeatOnly=false,timeoutMs=125000,fetchImpl=fetch,now=Date.now}={}){
+export async function collectGuardReadiness(token,reservation,{accountId=ACCOUNT,heartbeatOnly=false,timeoutMs=125000,fetchImpl=fetch,now=Date.now}={}){
   if(!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>150000)throw Error('Invalid readiness timeout');
-  const client=cloudflareTailClient(token,{fetchImpl}),versions=await client.versions(),sessions=[],receipts={},events=[];
+  const client=cloudflareTailClient(token,{accountId,fetchImpl}),versions=await client.versions(),sessions=[],receipts={},events=[];
   let timer,resolveDone,rejectDone;
   const done=new Promise((resolve,reject)=>{resolveDone=resolve;rejectDone=reject;});
   // Attach a rejection handler before network setup to avoid an unhandled

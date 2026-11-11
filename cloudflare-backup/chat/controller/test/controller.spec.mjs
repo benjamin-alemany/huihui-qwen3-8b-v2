@@ -2,6 +2,7 @@ import {it,expect,vi} from 'vitest';
 import {env,exports} from 'cloudflare:workers';
 import {runInDurableObject,evictDurableObject,runDurableObjectAlarm} from 'cloudflare:test';
 import {IMAGE,GPU,reservation} from '../session-policy.mjs';
+import {TARGET as HYPER_TARGET} from '../../hyperstack/fixtures.mjs';
 it('has no public admin/start/inference endpoint',async()=>{
   for(const path of ['/','/api/start','/api/status','/api/exec','/api/check'])expect((await exports.default.fetch(new Request('https://dummy.test'+path))).status).toBe(404);
 });
@@ -27,6 +28,17 @@ it('runs the readiness alarm deterministically with only dummy Cloudflare respon
  const spy=vi.spyOn(globalThis,'fetch').mockImplementation(async url=>{calls.push(String(url));expect(String(url)).toMatch(/^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/0{32}\/workers\/scripts\/unjailed-chat-stop-(?:primary|backup)\/deployments$/);return new Response(null,{status:503});});
  try{expect(env.RUNPOD_API_KEY).toBe('');await a.check();await runDurableObjectAlarm(a);const s=await a.status();expect(s.readiness.phase).toBe('failed');expect(s.launchEnabled).toBe(false);expect(calls.length).toBe(2);await runInDurableObject(a,async(_,ctx)=>expect(await ctx.storage.getAlarm()).toBe(null));}
  finally{spy.mockRestore();}
+});
+it('readiness alarm uses the trusted account setting and never the compiled dummy account',async()=>{
+ const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID()),accountId='1'.repeat(32),calls=[];
+ await runInDurableObject(a,instance=>{instance.env={...instance.env,CLOUDFLARE_ACCOUNT_ID:accountId};});
+ const spy=vi.spyOn(globalThis,'fetch').mockImplementation(async url=>{calls.push(String(url));expect(String(url)).toMatch(new RegExp('^https://api\\.cloudflare\\.com/client/v4/accounts/'+accountId+'/workers/scripts/unjailed-chat-stop-(?:primary|backup)/deployments$'));return new Response(null,{status:503});});
+ try{await a.check();await runDurableObjectAlarm(a);expect((await a.status()).readiness.phase).toBe('failed');expect(calls.length).toBe(2);}finally{spy.mockRestore();}
+});
+it('Hyperstack missing account setting refuses its free readiness alarm before HTTP',async()=>{
+ const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID());await runInDurableObject(a,instance=>{instance.env={...instance.env,HOSTING_PROVIDER:'hyperstack'};});
+ const spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{await a.check();await runDurableObjectAlarm(a);const s=await a.status();expect(s.readiness.phase).toBe('failed');expect(s.readiness.code).toBe('ACCOUNT_FORMAT');expect(s.launchBlockers).toContain('HYPERSTACK_GUARD_ACCOUNT_UNCONFIGURED');expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
 });
 it('unverified inference-network image cannot launch even if owner launch flags and a key are supplied',async()=>{
  const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID());
@@ -71,8 +83,39 @@ it('owner allowance and grant replay survive SQLite eviction without touching hi
  expect((await restored.grant({...grant,amountUSD:9})).error).toBe('GRANT_ID_REUSED');expect((await restored.grant({...grant,amountUSD:11})).error).toBe('INVALID_GRANT');
  expect((await restored.status()).testBudget).toEqual(before.testBudget);expect((await restored.status()).session).toBe(null);
 });
+it('actual controller refuses ordinary allowance writes during acceptance and preserves ordinary grants afterward',async()=>{
+ const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID()),grant={grantId:crypto.randomUUID(),amountUSD:1};
+ await runInDurableObject(a,i=>{i.env={...i.env,VALIDATION_MODE:'true'};});const before=await a.status();
+ expect((await a.grant(grant)).error).toBe('ORDINARY_ALLOWANCE_DISABLED_DURING_ACCEPTANCE');const after=await a.status();expect(after.ordinaryBudget).toEqual(before.ordinaryBudget);expect(after.testBudget).toEqual(before.testBudget);expect(after.ordinaryBudget.capUSD).toBe(0);
+ await runInDurableObject(a,async(i,ctx)=>{expect(await ctx.storage.get('ordinary-grant-v1:'+grant.grantId)).toBeUndefined();i.env={...i.env,VALIDATION_MODE:'false'};});expect((await a.grant(grant)).ordinaryBudget.capUSD).toBe(1);
+});
 it('duration quotes default thirty and capture only the three product choices',async()=>{
  const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID());expect((await a.quote()).minutes).toBe(30);
  for(const minutes of [15,30,60]){const q=await a.quote({minutes});expect(q.minutes).toBe(minutes);expect(q.maximumUSD).toBeCloseTo(.60*(minutes+5)/60,10);expect(q.launchEnabled).toBe(false);}
  for(const input of [{minutes:18},{minutes:600},{minutes:'30'},{minutes:30,extend:true}])expect((await a.quote(input)).error).toBe('INVALID_DURATION');
+});
+
+async function selectedController(patch){
+ const stub=env.SESSION_CONTROLLER.getByName(crypto.randomUUID());
+ await runInDurableObject(stub,instance=>{instance.env={...instance.env,HOSTING_PROVIDER:'hyperstack',START_ENABLED:'true',RUNPOD_API_KEY:'DUMMY_LEGACY_KEY_NEVER_USED',...patch};});
+ return stub;
+}
+it('malformed Hyperstack configuration reports honest blockers without Runpod fallback or HTTP',async()=>{
+ const stub=await selectedController({HYPERSTACK_TARGET_JSON:'{}',HYPERSTACK_API_KEY:'DUMMY_HYPERSTACK_KEY'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{
+  const status=await stub.status();expect(status.hostingProvider).toBe('hyperstack');expect(status.launchEnabled).toBe(false);expect(status.networkBoundaryReady).toBe(false);expect(status.launchBlockers).toContain('HYPERSTACK_TARGET_UNVERIFIED');expect(status.launchBlockers).toContain('HYPERSTACK_RUNTIME_ORCHESTRATOR_UNAVAILABLE');expect(status.launchBlockers).toContain('HYPERSTACK_ORIGINAL_ACCEPTANCE_UNCONFIGURED');expect(status.testBudget.originalAcceptance).toBeNull();expect(status.operatorBudgetReconciliation.ready).toBe(false);expect(JSON.stringify(status)).not.toContain('DUMMY_');
+  expect((await stub.quote()).error).toBe('HYPERSTACK_TARGET_UNVERIFIED');expect((await stub.start({quoteId:'anything',maximumUSD:.3})).error).toBe('HYPERSTACK_TARGET_UNVERIFIED');expect(await runInDurableObject(stub,i=>i.context())).toBeNull();expect(spy).not.toHaveBeenCalled();
+ }finally{spy.mockRestore();}
+});
+it('Hyperstack source release locks preserve grants and ledgers; Stop still revokes a durable session',async()=>{
+ const stub=await selectedController({HYPERSTACK_TARGET_JSON:JSON.stringify(HYPER_TARGET),HYPERSTACK_API_KEY:'DUMMY_HYPERSTACK_KEY'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{
+  const before=await stub.status();await stub.grant({grantId:crypto.randomUUID(),amountUSD:1});const granted=await stub.status();expect(granted.ordinaryBudget.capUSD).toBe(1);expect(granted.testBudget).toEqual(before.testBudget);expect(granted.launchBlockers).toContain('HYPERSTACK_RELEASE_UNPINNED');expect(granted.launchBlockers).toContain('HYPERSTACK_BUDGET_UNRECONCILED');expect(granted.launchEnabled).toBe(false);
+  const sessionId=crypto.randomUUID();await runInDurableObject(stub,instance=>instance.engine().tx(r=>{r.session={id:sessionId,phase:'ready',stopRequested:false,createAttempted:true,bootAt:Date.now(),deadline:Date.now()+60000,reservation:{name:'unjailed-chat-'+'a'.repeat(32),provider:'hyperstack'},quote:{minutes:30},leaseUntil:0};}));
+  const stopped=await stub.stop({sessionId});expect(stopped.session.stopRequested).toBe(true);expect(stopped.launchEnabled).toBe(false);expect(await runInDurableObject(stub,i=>i.context())).toBeNull();await runInDurableObject(stub,(_,ctx)=>ctx.storage.deleteAlarm());expect(spy).not.toHaveBeenCalled();
+ }finally{spy.mockRestore();}
+});
+it('unknown hosting-provider spelling cannot select the configured legacy provider',async()=>{
+ const stub=await selectedController({HOSTING_PROVIDER:'hyperstak'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{const status=await stub.status();expect(status.hostingProvider).toBe('invalid');expect(status.launchBlockers[0]).toBe('HOSTING_PROVIDER_INVALID');expect(status.launchEnabled).toBe(false);expect((await stub.start({quoteId:'anything',maximumUSD:.3})).error).toBe('HOSTING_PROVIDER_INVALID');expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
 });

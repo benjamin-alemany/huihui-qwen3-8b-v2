@@ -52,3 +52,11 @@ it('trusted sixty-minute bindings preserve exact expiry and refuse longer sessio
  expect(()=>sessionFrom(bound,now+3600000)).toThrow();
  expect(()=>sessionFrom({...bound,CHAT_SESSION:JSON.stringify({...session,minutes:61})},now)).toThrow();
 });
+
+
+it('Hyperstack sessions use the fixed tunnel origin and refuse injected URLs',()=>{
+ const now=Date.now(),session={provider:'hyperstack',vmId:'12345',createdAt:new Date(now).toISOString(),nonce:'a'.repeat(32),minutes:30};
+ const env={CHAT_ENABLED:'true',CHAT_SESSION:JSON.stringify(session),INFERENCE_API_KEY:'a'.repeat(64)};
+ expect(sessionFrom(env,now).url).toBe('https://inference.unjailed.work/v1/chat/completions');
+ for(const extra of [{url:'https://evil.test'},{origin:'https://evil.test'},{podId:'abcdefghijk'},{vmId:'0'},{vmId:'123/escape'},{provider:'other'}])expect(()=>sessionFrom({...env,CHAT_SESSION:JSON.stringify({...session,...extra})},now)).toThrow();
+});

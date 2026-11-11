@@ -1,7 +1,7 @@
 import {spawnSync} from 'node:child_process';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir,homedir} from 'node:os';
-import {dirname,join} from 'node:path';
+import {dirname,join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {preflight,root} from './preflight.mjs';
 preflight();
@@ -10,7 +10,9 @@ const temporary=mkdtempSync(join(tmpdir(),'unjailed-tests-'));
 const env={PATH:dirname(process.execPath)+':/usr/bin:/bin:/usr/sbin:/sbin',TMPDIR:temporary,CI:'1',WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:join(temporary,'wrangler.log'),UNJAILED_TEST_VIOLATION_FILE:join(temporary,'unexpected-outbound'),NODE_OPTIONS:'--import='+pathToFileURL(join(root,'.codex/deny-fetch.mjs')).href};
 let command,args;
 if(process.platform==='darwin'){
- const denied=['.codex','.ssh','.aws','.config','.docker','Library'].map(p=>'(subpath '+JSON.stringify(join(homedir(),p))+')').join('\n');
+ const privateProject=resolve(root,'..');
+ const protectedPaths=[...['.codex','.ssh','.aws','.config','.docker','Library'].map(p=>join(homedir(),p)),...['.secrets','secrets','workstation','cloudflare-backup'].map(p=>join(privateProject,p))];
+ const denied=protectedPaths.map(p=>'(subpath '+JSON.stringify(p)+')').join('\n');
  const profile=join(temporary,'offline.sb');
  writeFileSync(profile,`(version 1)\n(allow default)\n(deny network*)\n(allow network-bind (local ip "localhost:*"))\n(allow network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))\n(deny file-read* ${denied})\n`);
  command='/usr/bin/sandbox-exec';args=['-f',profile,process.execPath];

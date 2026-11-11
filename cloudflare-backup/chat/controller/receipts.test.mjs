@@ -60,6 +60,22 @@ test('heartbeat-only collection explicitly refuses launch readiness',async()=>{
   const t=transport({heartbeat:true});const result=await collectGuardReadiness('D'.repeat(40),null,{heartbeatOnly:true,fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});
   assert.equal(result.schedulerReady,false);assert.equal(result.heartbeatVerified,true);assert.equal(result.requiresExactReservation,true);assert.equal(t.deletes.length,2);
 });
+test('trusted account configuration changes only the fixed Cloudflare account path',async()=>{
+  const accountId='1'.repeat(32),t=transport();
+  const result=await collectGuardReadiness('D'.repeat(40),reservation,{accountId,fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});assert.equal(result.schedulerReady,true);
+  const api=t.calls.filter(c=>new URL(c.url).hostname==='api.cloudflare.com');assert(api.length>0);
+  assert(api.every(c=>c.url.startsWith('https://api.cloudflare.com/client/v4/accounts/'+accountId+'/workers/scripts/')));
+  assert(api.every(c=>Object.values(GUARDS).some(w=>new URL(c.url).pathname.includes('/scripts/'+w+'/'))));
+  assert(t.calls.filter(c=>new URL(c.url).hostname==='tail.developers.workers.dev').every(c=>c.options.headers.Authorization===undefined));
+});
+test('invalid account identifiers refuse before any Cloudflare request',async()=>{
+  let calls=0;const fetchImpl=async()=>{calls++;throw Error('No request');};
+  for(const accountId of ['',null,123,'a'.repeat(31),'A'.repeat(32),'1'.repeat(32)+'/../../other','https://evil.invalid']){
+    assert.throws(()=>cloudflareTailClient('D'.repeat(40),{accountId,fetchImpl}),e=>e.code==='ACCOUNT_FORMAT');
+    await assert.rejects(collectGuardReadiness('D'.repeat(40),null,{accountId,fetchImpl,heartbeatOnly:true,timeoutMs:1}),e=>e.code==='ACCOUNT_FORMAT');
+  }
+  assert.equal(calls,0);assert.equal(safeTailFailure({code:'ACCOUNT_FORMAT'}),'ACCOUNT_FORMAT');
+});
 test('text frames also remain supported after selecting binary ArrayBuffer delivery',async()=>{
   const t=transport({binary:false});const r=await collectGuardReadiness('D'.repeat(40),reservation,{fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});assert.equal(r.schedulerReady,true);assert.equal(t.deletes.length,2);
 });
@@ -83,4 +99,16 @@ test('a completed WebSocket upgrade is not aborted by the old ten-second handsha
     await new Promise(resolve=>setTimeout(resolve,10050));
     assert.equal(upgrade.options.signal.aborted,false);
   }finally{await session.dispose();}
+});
+
+
+test('Hyperstack scheduled receipts require exact nonce and both immutable destroy expiries',async()=>{
+ const {TARGET}=await import('../hyperstack/fixtures.mjs');
+ const q={provider:'hyperstack',kind:'chat',minutes:30,name:'unjailed-chat-'+'a'.repeat(32),nonce:'a'.repeat(32),image:reservation.image,target:TARGET,createdNotBefore:now-60000,createdNotAfter:now+120000,deadline:now-60000+30*60000,windowStart:reservation.windowStart,windowEnd:reservation.windowEnd};
+ const events=['primary','backup'].map(role=>({...event(role),logs:[{message:[JSON.stringify({event:'guard_tick',provider:'hyperstack',role,status:'waiting-for-reserved-vm',reservationName:q.name,image:q.image,nonce:q.nonce,deadline:q.deadline,expiry:q.deadline+(role==='backup'?60000:0)})]}]}));
+ const proof=verifyGuardReceipts(q,versions,events,{now});assert.equal(proof.provider,'hyperstack');assert.equal(proof.nonce,q.nonce);assert.equal(proof.guards.backup.expiry,q.deadline+60000);
+ for(const patch of [{provider:'runpod'},{status:'ARMED'},{nonce:'b'.repeat(32)},{deadline:q.deadline+1},{expiry:q.deadline+1},{image:reservation.image+'x'}]){
+  const bad=structuredClone(events),tick=JSON.parse(bad[0].logs[0].message[0]);bad[0].logs[0].message[0]=JSON.stringify({...tick,...patch});assert.throws(()=>verifyGuardReceipts(q,versions,bad,{now}));
+ }
+ assert.throws(()=>verifyGuardReceipts(q,versions,[event('primary'),event('backup')],{now}));
 });

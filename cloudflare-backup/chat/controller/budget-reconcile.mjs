@@ -18,7 +18,7 @@ export function applyOperatorBudget(record,policy){
  const prior=history.find(p=>p.id===policy.id);
  if(prior){if(prior.capUnits!==policy.capUnits||prior.spentFloorUnits!==policy.spentFloorUnits)throw new SessionError('OPERATOR_BUDGET_ID_REUSED',503);return;}
  // No live/uncertain session, held funds or unresolved create can be re-seeded.
- if(l.held!==0||!terminal(record.session)||(record.session?.createAttempted&&record.session.phase!=='stopped')||(record.session?.pod&&record.session.phase!=='stopped'))throw new SessionError('OPERATOR_BUDGET_ACTIVE',409);
+ if(l.held!==0||(record.ordinaryLedger?.held??0)!==0||!terminal(record.session)||(record.session?.createAttempted&&record.session.phase!=='stopped'&&record.session.definiteNoCreate!==true)||(record.session?.pod&&record.session.phase!=='stopped'))throw new SessionError('OPERATOR_BUDGET_ACTIVE',409);
  const spent=Math.max(l.spent,policy.spentFloorUnits);
  if(policy.capUnits<l.cap||policy.capUnits<spent)throw new SessionError('OPERATOR_BUDGET_WOULD_LOWER',409);
  // Only monotonic cap/spend changes. Keep approvals, session, quotes and history.

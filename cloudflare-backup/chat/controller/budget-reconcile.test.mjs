@@ -9,3 +9,11 @@ test('identical replay cannot double-debit and permits later active sessions',()
 test('active holds and uncertain creations block all new migrations atomically',()=>{for(const patch of [{held:1},{session:{phase:'ready'}},{session:{phase:'failed',createAttempted:true}},{session:{phase:'cancelled',pod:{id:'unresolved'}}}]){const r=record();if('held'in patch)r.ledger.held=patch.held;else r.session=patch.session;const before=structuredClone(r);assert.throws(()=>applyOperatorBudget(r,policy()),/OPERATOR_BUDGET_ACTIVE/);assert.deepEqual(r,before);}});
 test('cap cannot fall and spent floor never refunds prior accounting',()=>{const r=record(),before=structuredClone(r);assert.throws(()=>applyOperatorBudget(r,policy('0123456789abcdef',400,100)),/OPERATOR_BUDGET_WOULD_LOWER/);assert.deepEqual(r,before);applyOperatorBudget(r,policy('0123456789abcdef',1000,100));assert.equal(r.ledger.spent,200);});
 test('reused id with changed parameters refuses without mutation',()=>{const r=record();applyOperatorBudget(r,policy());const before=structuredClone(r);assert.throws(()=>applyOperatorBudget(r,policy('0123456789abcdef',1100,450)),/OPERATOR_BUDGET_ID_REUSED/);assert.deepEqual(r,before);});
+
+
+test('settled definite no-create can reconcile monotonically but unresolved holds cannot',()=>{
+ const r=record();r.session={phase:'failed',createAttempted:true,definiteNoCreate:true};applyOperatorBudget(r,policy());assert.equal(r.ledger.cap,1000);assert.deepEqual(r.ledger.usedApprovals,['already-used']);
+ for(const patch of [{ledger:{held:1}},{ordinaryLedger:{held:1}},{session:{phase:'failed',createAttempted:true,definiteNoCreate:false}}]){
+  const state=record();state.session={phase:'failed',createAttempted:true,definiteNoCreate:true};for(const [key,value]of Object.entries(patch))state[key]={...state[key],...value};const before=structuredClone(state);assert.throws(()=>applyOperatorBudget(state,policy()),/OPERATOR_BUDGET_ACTIVE/);assert.deepEqual(state,before);
+ }
+});
