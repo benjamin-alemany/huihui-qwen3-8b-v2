@@ -1,17 +1,25 @@
-name: Reviewed VM inference overlay publication
+name: Reviewed VM inference overlay publication or verification
 on:
   workflow_call:
     inputs:
       cpu_run_id:
         required: true
         type: string
+      candidate_digest:
+        description: Optional exact already-published VM digest; verifies without a build or registry write
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
-  packages: write
 jobs:
   build:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && inputs.candidate_digest == ''
+    permissions:
+      contents: read
+      actions: read
+      packages: write
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:
@@ -29,12 +37,18 @@ jobs:
           set -euo pipefail
           [[ "$CPU_RUN_ID" =~ ^[0-9]{1,20}$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID" > "$RUNNER_TEMP/cpu-proof.json"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[]|{name,status,conclusion}' > "$RUNNER_TEMP/cpu-jobs.ndjson"
           python3 - <<'PY'
           import json,os,subprocess
           proof=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-proof.json'))
           assert proof['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
           assert proof['path']=='.github/workflows/chat-boundary-cpu.yml'
           assert proof['status']=='completed' and proof['conclusion']=='success'
+          jobs=[json.loads(line) for line in open(os.environ['RUNNER_TEMP']+'/cpu-jobs.ndjson') if line.strip()]
+          for name in ['vm-boundary / verify','vm-boundary / docker-boundary']:
+              selected=[job for job in jobs if job['name']==name]
+              assert len(selected)==1 and selected[0]['status']=='completed' and selected[0]['conclusion']=='success', 'Actual VM CPU verification jobs must succeed; skipped dispatcher jobs do not qualify'
           sha=proof['head_sha'];assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
           subprocess.run(['git','merge-base','--is-ancestor',sha,'HEAD'],check=True)
           subprocess.run(['git','diff','--exit-code',sha,'HEAD','--','vm','chat/credential_boot.py','chat/credential_boundary.py','chat/offline_cache.py','chat/chat_server.py','start.py','.github/workflows/vm-boundary-cpu.yml'],check=True)
@@ -77,45 +91,91 @@ jobs:
           docker buildx rm unjailed-vm-builder || true
   verify-artifact:
     needs: build
+    if: always() && github.event.repository.visibility == 'public' && (inputs.candidate_digest != '' || needs.build.result == 'success')
     permissions:
       contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Require successful CPU checks on the unchanged artifact runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CPU_RUN_ID: ${{ inputs.cpu_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CPU_RUN_ID" =~ ^[0-9]{1,20}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID" > "$RUNNER_TEMP/cpu-proof.json"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$CPU_RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[]|{name,status,conclusion}' > "$RUNNER_TEMP/cpu-jobs.ndjson"
+          python3 - <<'PY'
+          import json,os,subprocess
+          proof=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-proof.json'))
+          assert proof['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert proof['path']=='.github/workflows/chat-boundary-cpu.yml'
+          assert proof['status']=='completed' and proof['conclusion']=='success'
+          jobs=[json.loads(line) for line in open(os.environ['RUNNER_TEMP']+'/cpu-jobs.ndjson') if line.strip()]
+          for name in ['vm-boundary / verify','vm-boundary / docker-boundary']:
+              selected=[job for job in jobs if job['name']==name]
+              assert len(selected)==1 and selected[0]['status']=='completed' and selected[0]['conclusion']=='success', 'Actual VM CPU verification jobs must succeed; skipped dispatcher jobs do not qualify'
+          sha=proof['head_sha'];assert len(sha)==40 and all(c in '0123456789abcdef' for c in sha)
+          subprocess.run(['git','merge-base','--is-ancestor',sha,'HEAD'],check=True)
+          subprocess.run(['git','diff','--exit-code',sha,'HEAD','--','vm','chat/credential_boot.py','chat/credential_boundary.py','chat/offline_cache.py','chat/chat_server.py','start.py','.github/workflows/vm-boundary-cpu.yml'],check=True)
+          PY
       - name: Require free disk for exact published artifact readback
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
-          python3 -c 'import shutil; assert shutil.disk_usage("/").free > 55*1024**3, "Stop without paid storage or runners"'
+          python3 - <<'PY'
+          import shutil
+          free=shutil.disk_usage('/').free
+          print('VM_ARTIFACT_RUNNER_FREE_BYTES_BEFORE_PULL='+str(free))
+          assert free > 55*1024**3, 'Stop without paid storage or runners'
+          PY
       - name: Check published code and unchanged offline cache without GPU or network
         env:
-          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest }}
+          CANDIDATE_DIGEST: ${{ inputs.candidate_digest || needs.build.outputs.digest }}
         run: |
           set -euo pipefail
           [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2@$CANDIDATE_DIGEST"
           docker pull "$image"
+          docker image inspect "$image" --format '{{json .Config.Labels}}' > "$RUNNER_TEMP/image-labels.json"
+          docker image inspect "$image" --format '{{.Size}}' > "$RUNNER_TEMP/image-size.txt"
           docker image inspect "$image" --format '{{json .Config.Entrypoint}}' | \
             python3 -c 'import json,sys; assert json.load(sys.stdin)==["python3","-I","-S","-B","/opt/qwen/credential_boot.py"]'
           python3 - <<'PY'
-          import hashlib,json,os
-          mapping={'vm/boot.py':'inference_only.py','vm/model_boot.py':'model_boot.py','vm/preflight.py':'preflight.py','vm/attestation.py':'attestation.py','vm/inference_policy.py':'inference_policy.py','chat/credential_boot.py':'credential_boot.py','chat/credential_boundary.py':'credential_boundary.py','chat/offline_cache.py':'offline_cache.py','chat/chat_server.py':'chat_server.py','start.py':'start.py'}
+          import hashlib,json,os,re,shutil,subprocess
+          labels=json.load(open(os.environ['RUNNER_TEMP']+'/image-labels.json'))
+          assert labels['org.opencontainers.image.source']=='https://github.com/'+os.environ['GITHUB_REPOSITORY']
+          assert labels['work.unjailed.profile']=='vm-inference-v1'
+          source=labels['org.opencontainers.image.revision'];assert re.fullmatch('[0-9a-f]{40}',source)
+          subprocess.run(['git','merge-base','--is-ancestor',source,'HEAD'],check=True)
+          subprocess.run(['git','diff','--exit-code',source,'HEAD','--','vm','chat/credential_boot.py','chat/credential_boundary.py','chat/offline_cache.py','chat/chat_server.py','start.py'],check=True)
+          print('VM_ARTIFACT_PUBLISHED_SOURCE='+source)
+          print('VM_ARTIFACT_UNCOMPRESSED_IMAGE_BYTES='+open(os.environ['RUNNER_TEMP']+'/image-size.txt').read().strip())
+          print('VM_ARTIFACT_RUNNER_FREE_BYTES_AFTER_PULL='+str(shutil.disk_usage('/').free))
+          mapping={'vm/boot.py':'inference_only.py','vm/model_boot.py':'model_boot.py','vm/preflight.py':'preflight.py','vm/egress_probe.py':'egress_probe.py','vm/attestation.py':'attestation.py','vm/inference_policy.py':'inference_policy.py','vm/image_setup.py':'image_setup.py','vm/host_policy.py':'host_policy.py','chat/credential_boot.py':'credential_boot.py','chat/credential_boundary.py':'credential_boundary.py','chat/offline_cache.py':'offline_cache.py','chat/chat_server.py':'chat_server.py','start.py':'start.py'}
           with open(os.environ['RUNNER_TEMP']+'/code-hashes.json','w') as f:json.dump({target:hashlib.sha256(open(source,'rb').read()).hexdigest() for source,target in mapping.items()},f)
           PY
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m \
             --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 6g --pids-limit 128 \
+            -e VLLM_ENABLE_V1_MULTIPROCESSING=0 \
             --mount "type=bind,source=$RUNNER_TEMP/code-hashes.json,target=/expected-code-hashes.json,readonly" \
             --entrypoint python3 "$image" -I -B -c '
           import hashlib,json,os,sys
           sys.path.insert(0,"/opt/qwen")
           for name,digest in json.load(open("/expected-code-hashes.json")).items():
               assert hashlib.sha256(open("/opt/qwen/"+name,"rb").read()).hexdigest()==digest
+          print("VM_ARTIFACT_ALL_COPIED_CODE_HASHES_VERIFIED")
           import inference_policy,offline_cache,chat_server
           inference_policy.install()
           path=offline_cache.verify_cache()
           assert os.getuid()==10001 and not os.access(path,os.W_OK) and not os.access("/opt/qwen",os.W_OK)
+          print("VM_ARTIFACT_OFFLINE_CACHE_HASHES_OWNERSHIP_AND_PERMISSIONS_VERIFIED")
           import torch,vllm
           assert torch.__version__.split("+")[0]=="2.13.0" and vllm.__version__=="0.32.0"
           assert chat_server.engine_options(path)["distributed_executor_backend"]=="uni"

@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       diagnostic_digest:
-        description: Optional exact existing diagnostic digest for CPU review only, without rebuilding
+        description: Optional exact existing diagnostic or VM image digest for free CPU verification without rebuilding
         required: false
         default: ''
         type: string
@@ -163,3 +163,4 @@ jobs:
     uses: ./.github/workflows/vm-inference-image.yml
     with:
       cpu_run_id: ${{ inputs.cpu_run_id }}
+      candidate_digest: ${{ inputs.diagnostic_digest }}
