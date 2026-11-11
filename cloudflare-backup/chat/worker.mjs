@@ -144,8 +144,10 @@ export class ChatQuota extends DurableObject {
 export default {
   async fetch(request,env){
     const url=new URL(request.url);
-    if(url.origin!==env.CHAT_ORIGIN||url.search)return json({error:"Unknown origin or query"},403);
+    const logoutReturn=request.method==='GET'&&url.pathname==='/'&&url.search==='?__cf_access_message=logged_out';
+    if(url.origin!==env.CHAT_ORIGIN||url.search&&!logoutReturn)return json({error:"Unknown origin or query"},403);
     if(!await authenticate(request,env))return json({error:"Owner login is not configured or authorized"},401);
+    if(logoutReturn)return new Response(null,{status:302,headers:{...headers,Location:'/'}});
     const history=env.HISTORY_ENABLED==='true'?'private-cloud-opt-in':'tab-memory-only';
     // Never fall back to a static session when dynamic cloud control is enabled.
     const inferenceEnv=async()=>env.SESSION_CONTROLLER_ENABLED==='true'?(await env.INFERENCE_CONTROLLER.context()??{}):env;

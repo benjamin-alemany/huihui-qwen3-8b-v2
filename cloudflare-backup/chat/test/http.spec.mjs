@@ -3,6 +3,24 @@ import {exports,env} from "cloudflare:workers";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import {MODEL} from "../policy.mjs";
 import gateway from '../worker.mjs';
+it('canonicalizes only the exact authenticated Cloudflare logout return without relaxing query or origin restrictions',async()=>{
+ const issuer='https://logout-return-dummy-test.cloudflareaccess.com',origin='https://unjailed.work',marker='?__cf_access_message=logged_out';
+ const {privateKey,publicKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='dummy-logout-return-test';
+ const token=async(overrides={})=>new SignJWT({sub:'owner',email:env.OWNER_EMAIL,iss:issuer,aud:env.ACCESS_AUD,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600,...overrides}).setProtectedHeader({alg:'RS256',kid:jwk.kid}).sign(privateKey);
+ const assets=vi.fn(async()=>new Response('DUMMY private root',{headers:{'Content-Type':'text/html'}})),controller=vi.fn(),inference=vi.fn(),bound={...env,ACCESS_ISSUER:issuer,ASSETS:{fetch:assets},CONTROLLER:{status:controller},INFERENCE_CONTROLLER:{context:inference}};
+ const spy=vi.spyOn(globalThis,'fetch').mockImplementation(async url=>{expect(String(url)).toBe(issuer+'/cdn-cgi/access/certs');return Response.json({keys:[jwk]});});
+ const request=(path,jwt,method='GET',base=origin)=>new Request(base+path,{method,headers:jwt?{'Cf-Access-Jwt-Assertion':jwt}:{}});
+ try{
+  for(const jwt of [undefined,'forged',await token({email:'attacker@example.test'}),await token({aud:'wrong-audience'})]){const r=await gateway.fetch(request('/'+marker,jwt),bound);expect(r.status).toBe(401);expect(r.headers.has('Location')).toBe(false);}
+  const owner=await token(),redirect=await gateway.fetch(request('/'+marker,owner),bound);
+  expect(redirect.status).toBe(302);expect(redirect.headers.get('Location')).toBe('/');expect(redirect.headers.get('Cache-Control')).toBe('no-store');expect(redirect.headers.get('X-Content-Type-Options')).toBe('nosniff');expect(redirect.headers.get('Referrer-Policy')).toBe('no-referrer');expect(redirect.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");expect(await redirect.text()).toBe('');
+  for(const path of ['/?other=logged_out','/?__cf_access_message=logged_in','/'+marker+'&next=https://attacker.test','/'+marker+'&__cf_access_message=logged_out','/?__cf_access_message=%6Cogged_out','/api/status'+marker,'/app.js'+marker]){const r=await gateway.fetch(request(path,owner),bound);expect(r.status,path).toBe(403);expect(r.headers.has('Location'),path).toBe(false);}
+  for(const method of ['POST','HEAD']){const r=await gateway.fetch(request('/'+marker,owner,method),bound);expect(r.status).toBe(403);expect(r.headers.has('Location')).toBe(false);}
+  const foreign=await gateway.fetch(request('/'+marker,owner,'GET','https://attacker.test'),bound);expect(foreign.status).toBe(403);expect(foreign.headers.has('Location')).toBe(false);
+  expect(assets).not.toHaveBeenCalled();expect(controller).not.toHaveBeenCalled();expect(inference).not.toHaveBeenCalled();
+  const root=await gateway.fetch(request(redirect.headers.get('Location'),owner),bound);expect(root.status).toBe(200);expect(await root.text()).toBe('DUMMY private root');expect(assets).toHaveBeenCalledTimes(1);
+ }finally{spy.mockRestore();}
+});
 it('serves the complete authenticated browser module graph through ASSETS with security headers',async()=>{
  const issuer='https://assets-dummy-test.cloudflareaccess.com',bound={...env,ACCESS_ISSUER:issuer};
  const {privateKey,publicKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='dummy-assets-test';
