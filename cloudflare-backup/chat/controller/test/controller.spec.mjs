@@ -6,10 +6,10 @@ it('has no public admin/start/inference endpoint',async()=>{
   for(const path of ['/','/api/start','/api/status','/api/exec','/api/check'])expect((await exports.default.fetch(new Request('https://dummy.test'+path))).status).toBe(404);
 });
 it('budget and spent approvals survive real object eviction; no key means paid Start stays locked',async()=>{
- const name=crypto.randomUUID(),a=env.SESSION_CONTROLLER.getByName(name);const quote=await a.quote();expect(quote.maximumUSD).toBe(.23);expect(quote.live).toBe(false);
+ const name=crypto.randomUUID(),a=env.SESSION_CONTROLLER.getByName(name);const quote=await a.quote();expect(quote.maximumUSD).toBe(.35);expect(quote.live).toBe(false);
  const result=await a.start({quoteId:quote.id,maximumUSD:quote.maximumUSD});expect(result.error).toBe('LAUNCH_LOCKED');
  await runInDurableObject(a,instance=>instance.engine().tx(r=>{r.ledger.spent+=100;r.ledger.usedApprovals.push('already-used');}));
- const before=await a.status();await evictDurableObject(a);const after=await env.SESSION_CONTROLLER.getByName(name).status();expect(after.budget).toEqual(before.budget);expect(after.budget.originalAcceptance.spentUSD).toBe(.4);expect(after.launchEnabled).toBe(false);
+ const before=await a.status();await evictDurableObject(a);const after=await env.SESSION_CONTROLLER.getByName(name).status();expect(after.budget).toEqual(before.budget);expect(after.testBudget.originalAcceptance.spentUSD).toBe(.4);expect(after.launchEnabled).toBe(false);
 });
 it('persists one pending free check across handles and refuses duplicate scheduling',async()=>{
   const name=crypto.randomUUID(),a=env.SESSION_CONTROLLER.getByName(name);
@@ -58,7 +58,21 @@ it('retains every observed Pod across SQLite eviction until explicit absence is 
   return {blocked,ids,earlyDisarms,finished:await engine.status(),disarmed};
  });
  expect(result.ids).toEqual([p.id,other.id]);expect(result.blocked.session.cleanupVerified).toBe(false);
- expect(result.blocked.budget.reservedUSD).toBe(.23);expect(result.earlyDisarms).toEqual([]);
- expect(result.finished.session.cleanupVerified).toBe(true);expect(result.finished.budget.reservedUSD).toBe(0);
+ expect(result.blocked.testBudget.reservedUSD).toBe(.23);expect(result.earlyDisarms).toEqual([]);
+ expect(result.finished.session.cleanupVerified).toBe(true);expect(result.finished.testBudget.reservedUSD).toBe(0);
  expect(result.disarmed).toEqual([0,1]);
+});
+
+it('owner allowance and grant replay survive SQLite eviction without touching historical accounting',async()=>{
+ const name=crypto.randomUUID(),a=env.SESSION_CONTROLLER.getByName(name),before=await a.status(),grant={grantId:crypto.randomUUID(),amountUSD:10};
+ expect(before.ordinaryBudget.remainingUSD).toBe(0);expect(before.launchEnabled).toBe(false);
+ const issued=await a.grant(grant);expect(issued.ordinaryBudget.remainingUSD).toBe(10);expect(issued.ordinaryBudget.grantCount).toBe(1);expect(issued.launchEnabled).toBe(false);
+ await evictDurableObject(a);const restored=env.SESSION_CONTROLLER.getByName(name);expect((await restored.grant(grant)).ordinaryBudget).toEqual(issued.ordinaryBudget);
+ expect((await restored.grant({...grant,amountUSD:9})).error).toBe('GRANT_ID_REUSED');expect((await restored.grant({...grant,amountUSD:11})).error).toBe('INVALID_GRANT');
+ expect((await restored.status()).testBudget).toEqual(before.testBudget);expect((await restored.status()).session).toBe(null);
+});
+it('duration quotes default thirty and capture only the three product choices',async()=>{
+ const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID());expect((await a.quote()).minutes).toBe(30);
+ for(const minutes of [15,30,60]){const q=await a.quote({minutes});expect(q.minutes).toBe(minutes);expect(q.maximumUSD).toBeCloseTo(.60*(minutes+5)/60,10);expect(q.launchEnabled).toBe(false);}
+ for(const input of [{minutes:18},{minutes:600},{minutes:'30'},{minutes:30,extend:true}])expect((await a.quote(input)).error).toBe('INVALID_DURATION');
 });

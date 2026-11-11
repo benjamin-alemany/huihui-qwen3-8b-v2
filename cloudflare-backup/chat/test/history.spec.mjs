@@ -37,3 +37,28 @@ it('keeps saved history across RPC handles, bounds storage and deletes only the 
  expect(await stub.savedWrite(sample)).toBe(null);expect((await stub.savedList()).length).toBe(20);
  await stub.savedDelete(one.id);expect(await stub.savedRead(one.id)).toBe(null);expect((await stub.savedList()).length).toBe(19);
 });
+it('upserts drafts in place, preserves exact text and rejects lost-create/concurrent revisions',async()=>{
+ const stub=env.CHAT_QUOTA.getByName(crypto.randomUUID()),id=crypto.randomUUID(),body={id,revision:0,title:'Draft',messages:[],draft:'  unsent <script>  '};
+ const first=await stub.savedUpsert(body);expect(first.item).toMatchObject({...body,revision:1});
+ expect(await stub.savedUpsert(body)).toMatchObject({error:'REVISION_CONFLICT',status:409,item:first.item});
+ const edited=await stub.savedUpsert({...body,revision:1,draft:'Second draft'});expect(edited.item.revision).toBe(2);expect(await stub.savedList()).toHaveLength(1);
+ expect(await stub.savedUpsert({...body,revision:1,draft:'Stale tab'})).toMatchObject({status:409,item:edited.item});
+ await evictDurableObject(stub);expect((await stub.savedRead(id)).draft).toBe('Second draft');
+});
+it('migrates existing version-one snapshots without losing ids timestamps or unsent text',async()=>{
+ const stub=env.CHAT_QUOTA.getByName(crypto.randomUUID()),id=crypto.randomUUID(),messages=[...sample.messages,{role:'user',content:' exact unsent text '}];
+ await runInDurableObject(stub,(_,ctx)=>{
+  ctx.storage.sql.exec('DROP TABLE conversations');ctx.storage.sql.exec('CREATE TABLE conversations (id TEXT PRIMARY KEY,title TEXT NOT NULL,messages TEXT NOT NULL,updated_at INTEGER NOT NULL)');
+  ctx.storage.sql.exec('INSERT INTO conversations VALUES (?,?,?,?)',id,'Old snapshot',JSON.stringify(messages),1234);
+ });
+ await evictDurableObject(stub);
+ expect(await stub.savedRead(id)).toEqual({id,revision:1,title:'Old snapshot',messages:sample.messages,draft:' exact unsent text ',updated_at:1234});
+ expect((await stub.savedBackup()).version).toBe(2);
+});
+it('imports version-one drafts and version-two editable conversations without overwriting history',async()=>{
+ const stub=env.CHAT_QUOTA.getByName(crypto.randomUUID()),legacy={format:'unjailed.chat-backup',version:1,conversations:[{title:'Legacy draft',messages:[{role:'user',content:'  retained  '}]}]};
+ expect(await stub.savedImport(legacy)).toEqual({imported:1,duplicates:0});
+ const v2=await stub.savedBackup();expect(v2).toEqual({format:'unjailed.chat-backup',version:2,conversations:[{title:'Legacy draft',messages:[],draft:'  retained  '}]});
+ expect(await stub.savedImport(v2)).toEqual({imported:0,duplicates:1});
+ expect(await stub.savedImport({...v2,conversations:[{...v2.conversations[0],draft:'Different'}]})).toEqual({imported:1,duplicates:0});
+});

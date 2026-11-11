@@ -40,7 +40,7 @@ it("requires the signed owner JWT and same-origin JSON before contacting inferen
    expect((await (await exports.default.fetch(restoreRequest('/api/history/import/preview'))).json()).importable).toBe(1);
    expect((await exports.default.fetch(restoreRequest('/api/history/import'))).status).toBe(201);
    const exportResponse=await exports.default.fetch(new Request('https://unjailed.work/api/history/backup',{headers:{'Cf-Access-Jwt-Assertion':valid}}));
-   expect(exportResponse.headers.get('Cache-Control')).toBe('no-store');expect(await exportResponse.json()).toEqual(backup);
+   expect(exportResponse.headers.get('Cache-Control')).toBe('no-store');expect(await exportResponse.json()).toEqual({format:'unjailed.chat-backup',version:2,conversations:[{title:'HTTP restore',messages:[],draft:'DUMMY restore'}]});
    expect(calls).toHaveLength(1);
    const checkRequest=(body={},origin='https://unjailed.work',jwt=valid)=>new Request('https://unjailed.work/api/controller/check',{method:'POST',headers:{'Cf-Access-Jwt-Assertion':jwt,Origin:origin,'Content-Type':'application/json','X-Workstation-Request':'1'},body:JSON.stringify(body)});
    expect((await exports.default.fetch(checkRequest({},'https://attacker.test'))).status).toBe(403);
@@ -52,6 +52,21 @@ it("requires the signed owner JWT and same-origin JSON before contacting inferen
     expect((await exports.default.fetch(request(valid,'https://attacker.test',path))).status).toBe(403);
     expect((await exports.default.fetch(request('forged','https://unjailed.work',path))).status).toBe(401);
    }
+   const document={id:crypto.randomUUID(),revision:0,title:'HTTP autosave',messages:[],draft:'Exact cloud draft'};
+   expect((await exports.default.fetch(restoreRequest('/api/history/upsert',document,'https://attacker.test'))).status).toBe(403);
+   expect((await exports.default.fetch(restoreRequest('/api/history/upsert',document,'https://unjailed.work','forged'))).status).toBe(401);
+   const upsert=await exports.default.fetch(restoreRequest('/api/history/upsert',document));expect(upsert.status).toBe(200);const current=(await upsert.json()).item;expect(current).toMatchObject({...document,revision:1});
+   const conflict=await exports.default.fetch(restoreRequest('/api/history/upsert',document));expect(conflict.status).toBe(409);expect((await conflict.json()).item).toEqual(current);
+   const turn={conversationId:current.id,revision:1,turnId:crypto.randomUUID()};
+   expect((await exports.default.fetch(restoreRequest('/api/turns',turn,'https://attacker.test'))).status).toBe(403);
+   expect((await exports.default.fetch(restoreRequest('/api/turns',turn,'https://unjailed.work','forged'))).status).toBe(401);
+   expect((await exports.default.fetch(new Request('https://unjailed.work/api/turns/'+turn.turnId))).status).toBe(401);
+   expect((await exports.default.fetch(restoreRequest('/api/turns',{...turn,url:'https://attacker.test'}))).status).toBe(400);
+   expect((await exports.default.fetch(restoreRequest('/api/session/quote',{minutes:30}))).status).toBe(200);
+   expect((await exports.default.fetch(restoreRequest('/api/session/quote',{minutes:10}))).status).toBe(400);
+   expect((await exports.default.fetch(restoreRequest('/api/session/grant',{grantId:crypto.randomUUID(),amountUSD:1},'https://attacker.test'))).status).toBe(403);
+   expect((await exports.default.fetch(restoreRequest('/api/session/grant',{grantId:crypto.randomUUID(),amountUSD:1},'https://unjailed.work','forged'))).status).toBe(401);
+   expect((await exports.default.fetch(restoreRequest('/api/session/grant',{grantId:crypto.randomUUID(),amountUSD:1}))).status).toBe(202);
    let context=null;
    const dynamic={...env,SESSION_CONTROLLER_ENABLED:'true',INFERENCE_CONTROLLER:{context:async()=>context}};
    expect((await gateway.fetch(request(valid),dynamic)).status).toBe(503);expect(calls).toHaveLength(1);

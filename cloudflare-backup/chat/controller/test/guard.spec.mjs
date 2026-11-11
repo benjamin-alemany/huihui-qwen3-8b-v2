@@ -127,3 +127,13 @@ for(const mode of ['tick','disarm'])it(`${mode} durably remembers a new Pod firs
   f.pods=[];await attempt();expect((await stub.report()).armed).toBe(false);
  }finally{spy.mockRestore();}
 });
+it('rearming the same nonce cannot change its bound duration or creation window',async()=>{
+ const stub=env.STOP_RESERVATION.getByName(crypto.randomUUID()),q={...reservation(Date.now(),'e'.repeat(32)),minutes:30};
+ await stub.arm({reservation:q,key:'DUMMY_CONTROL_KEY'});await stub.arm({reservation:q,key:'DUMMY_CONTROL_KEY'});
+ await runInDurableObject(stub,async instance=>{
+  for(const patch of [{minutes:60},{windowEnd:new Date(Date.parse(q.windowEnd)+1000).toISOString()}]){
+   let denied=false;try{await instance.arm({reservation:{...q,...patch},key:'DUMMY_CONTROL_KEY'});}catch{denied=true;}expect(denied).toBe(true);
+  }
+ });
+ expect((await stub.report()).image).toBe(q.image);await stub.disarm(q.name);
+});

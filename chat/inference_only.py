@@ -29,8 +29,8 @@ def deadline_from(env, now=None):
     except (KeyError, TypeError, ValueError):
         raise ValueError("Valid immutable UTC creation and deadline timestamps are required") from None
     current = time.time() if now is None else now
-    if not created <= current < deadline or not 0 < deadline - created <= 30 * 60:
-        raise ValueError("Only an unexpired session of at most thirty minutes is allowed")
+    if not created <= current < deadline or not 0 < deadline - created <= 60 * 60:
+        raise ValueError("Only an unexpired session of at most sixty minutes is allowed")
     start.validate_environment(env)
     return deadline
 

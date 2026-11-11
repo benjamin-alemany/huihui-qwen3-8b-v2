@@ -1,4 +1,5 @@
-export const MODEL="huihui-qwen3-8b-v2";
+import release from '../../release/manifest.json' with {type:'json'};
+export const MODEL=release.model.servedName;
 export const LIMITS=Object.freeze({requestBytes:16384,responseBytes:65536,characters:6000,messages:25,turns:64,maxTokens:512,timeoutMs:90000});
 export class Rejection extends Error {constructor(message,status=400){super(message);this.status=status;}}
 const exact=(value,keys)=>value && typeof value==="object" && !Array.isArray(value) && Object.keys(value).sort().join()===keys.sort().join();
@@ -9,7 +10,7 @@ export function sessionFrom(env,now=Date.now()) {
   let s;try{s=JSON.parse(env.CHAT_SESSION);}catch{throw new Rejection("Chat session is not armed",503);}
   if(!exact(s,["podId","createdAt","nonce","minutes"]) || !/^[a-z0-9]{10,32}$/.test(s.podId) ||
     !/^[a-f0-9]{32}$/.test(s.nonce) || !/^\d{4}-\d\d-\d\dT.*Z$/.test(s.createdAt) ||
-    !Number.isInteger(s.minutes) || s.minutes<5 || s.minutes>30)
+    !Number.isInteger(s.minutes) || s.minutes<5 || s.minutes>60)
     throw new Rejection("Invalid session binding",503);
   const created=Date.parse(s.createdAt),deadline=created+s.minutes*60000;
   if(!Number.isFinite(created)||created>now||now>=deadline)throw new Rejection("Session has not started or has expired",409);

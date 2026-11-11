@@ -45,3 +45,10 @@ it("serializes replies durably and old leases cannot clear a new reply",async()=
  const last=await stub.acquire();expect(last).not.toBe(null);await stub.release(last);
  expect(await stub.acquire()).toBe(null);
 });
+it('trusted sixty-minute bindings preserve exact expiry and refuse longer sessions',()=>{
+ const session={...JSON.parse(env.CHAT_SESSION),createdAt:new Date(now).toISOString(),minutes:60};
+ const bound={...env,CHAT_SESSION:JSON.stringify(session)};
+ expect(sessionFrom(bound,now).deadline).toBe(now+3600000);
+ expect(()=>sessionFrom(bound,now+3600000)).toThrow();
+ expect(()=>sessionFrom({...bound,CHAT_SESSION:JSON.stringify({...session,minutes:61})},now)).toThrow();
+});

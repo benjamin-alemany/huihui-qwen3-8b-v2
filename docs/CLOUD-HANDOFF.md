@@ -2,20 +2,11 @@
 
 ## Goal and current state
 
-Build a private chat-only Qwen service accessed through unjailed.work, with timed
-Runpod sessions controlled by Cloudflare independently of a laptop. Full agent
-execution, project terminals and the larger workstation remain a later phase.
+Implement the approved private-chat product plan. The canonical code is this reviewed branch; current facts are in PROJECT-STATUS.md and CUDA-DRIVER-RUNPOD-FINDINGS.md. The existing Cloudflare interface/controller are deployed with inference and paid Start locked. Earlier functional GPU chat does not establish readiness for the newer network boundary. The exact offline image failed native CUDA; its release pin remains null.
 
-The inference image and credential boundary have already passed privately
-recorded Runpod/GPU tests. The controller/interface is deployed with paid Start
-and guard arming disabled. Its new end-to-end paid acceptance is still pending.
-This publication/environment setup does not approve that acceptance.
+The selected next inference host is a Hyperstack A6000 VM, subject to the account-access/price/stock/permissions/image gate. No VM or funding is authorized by this document. Provider-independent autosave and repeat-session work can proceed free; do not build around an unverified provider or initiate another Runpod compatibility experiment.
 
-The historical inference image passed earlier functional tests, but does not
-establish readiness for the new network/cache boundary. The release approval pin
-remains null. A candidate serving image and exact runtime validation will be
-needed after the remaining isolation gates and separate owner approval; neither
-publication nor a paid run is authorized by this handoff. See PROJECT-STATUS.md.
+Free code changes do not authorize credit purchases, subscriptions, auto-pay, paid resources, production unlocks or agent execution. Paid acceptance and provider funding retain their separate explicit approval requirements. The owner must complete account/legal/payment actions. Keep all real credentials out of this development checkout and all public evidence.
 
 ## Repository map
 

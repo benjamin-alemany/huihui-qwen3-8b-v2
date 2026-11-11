@@ -20,10 +20,16 @@ export class StopReservation extends DurableObject {
   async arm(input){
     if(this.env.GUARD_ARM_ENABLED!=='true')throw Error('Guard arming is locked');
     const q=input?.reservation;queryFrom(JSON.stringify(q));
-    if(q.kind!=='chat'||Object.keys(q).sort().join()!=='image,kind,name,windowEnd,windowStart'||typeof input.key!=='string'||input.key.length<16)throw Error('Invalid guard arm');
+    if(q.kind!=='chat'||!['image,kind,name,windowEnd,windowStart','image,kind,minutes,name,windowEnd,windowStart'].includes(Object.keys(q).sort().join())||typeof input.key!=='string'||input.key.length<16)throw Error('Invalid guard arm');
     await this.ctx.storage.transaction(async tx=>{
       const prior=await tx.get('active');
-      if(prior){if(prior.reservation.name===q.name)return;throw Error('Another reservation is armed');}
+      if(prior){
+        if(prior.reservation.name===q.name){
+          for(const field of ['image','kind','minutes','windowStart','windowEnd'])if(prior.reservation[field]!==q[field])throw Error('Reservation identity changed');
+          return;
+        }
+        throw Error('Another reservation is armed');
+      }
       await tx.put('active',{reservation:q,key:input.key,seen:[],deleted:[],leaseUntil:0});await tx.setAlarm(Date.now()+100);
     });return {armed:true,name:q.name};
   }
@@ -31,7 +37,7 @@ export class StopReservation extends DurableObject {
     if(!Number.isFinite(at)||at>Date.now()+1000)throw Error('Invalid early stop');
     await this.ctx.storage.transaction(async tx=>{const s=await tx.get('active');if(!s||s.reservation.name!==name)throw Error('Reservation changed');s.reservation.earlyStopAt=new Date(Math.min(Date.parse(s.reservation.earlyStopAt??'9999-01-01T00:00:00Z'),at)).toISOString();await tx.put('active',s);await tx.setAlarm(Date.now()+100);});return {shortened:true};
   }
-  async report(){const s=await this.ctx.storage.get('active'),r=await this.ctx.storage.get('lastReport');return {armed:!!s,name:s?.reservation.name??r?.name??null,deleted:s?.deleted??r?.deleted??[]};}
+  async report(){const s=await this.ctx.storage.get('active'),r=await this.ctx.storage.get('lastReport');return {armed:!!s,name:s?.reservation.name??r?.name??null,image:s?.reservation.image??null,deleted:s?.deleted??r?.deleted??[]};}
   async disarm(name){
     // The controller may have observed fewer duplicates than this guard.
     // Verify our own evidence before accepting its cleanup confirmation.
@@ -87,7 +93,7 @@ export default {
   async scheduled(_,env){
     const state=stub(env),result=await state.tick(),report=await state.report();
     // Only the cron handler emits guard_tick, never an alarm or owner RPC.
-    console.log(JSON.stringify({event:'guard_tick',role:env.CHAT_STOP_ROLE,reservationName:report.armed?report.name:undefined,image:report.armed?'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:f4fda4da17fe00a8188527d3a774dcc487529b63fe2e10359912d24d4ee83761':undefined,...result,at:new Date().toISOString()}));
+    console.log(JSON.stringify({event:'guard_tick',role:env.CHAT_STOP_ROLE,reservationName:report.armed?report.name:undefined,image:report.armed?report.image:undefined,...result,at:new Date().toISOString()}));
     if(result.results?.some(r=>r.status==='stop_requested_retrying'))throw Error('STOP pending');
   }
 };

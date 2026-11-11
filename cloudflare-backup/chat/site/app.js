@@ -1,101 +1,70 @@
-import {chatFrom,parseBackup,backupFrom,draftSnapshot,textExport,draftFingerprint,BACKUP_LIMITS} from './recovery.js';
-const $=selector=>document.querySelector(selector);
-let messages=[],deadline=0,ready=false,busy=false,historyReady=false,controlClosed=false;
-let clean=draftFingerprint([],''),replacement=null,importing=null;
-const dirty=()=>draftFingerprint(messages,$('#message').value)!==clean;
-const markClean=()=>{clean=draftFingerprint(messages,$('#message').value);update();};
-let guardPollingUntil=0;
-async function guardStatus(){
- try{
-  const r=await fetch('/api/controller/status',{cache:'no-store'});if(!r.ok)throw Error();const s=await r.json(),state=s.readiness;
-  const checking=['pending','checking'].includes(state?.phase);$('#check-guards').disabled=checking;
-  if(checking){$('#guard-status').textContent='Checking both cloud safeguards. This continues if you close the browser. This check does not start a GPU.';guardPollingUntil=Math.max(guardPollingUntil,state.expiresAt||0);}
-  else if(state?.phase==='verified')$('#guard-status').textContent='Last cloud heartbeat check passed'+(state.finishedAt?' at '+new Date(state.finishedAt).toLocaleString():'')+'. Every launch still requires fresh reservation checks. This check started no GPU.';
-  else if(state?.phase==='failed')$('#guard-status').textContent='Cloud safeguard verification failed. GPU launch stays locked. You can run this free check again.';
-  else $('#guard-status').textContent='Check that both cloud safeguards are running. This free check does not start a GPU.';
-  if(checking&&Date.now()<guardPollingUntil)setTimeout(guardStatus,3000);
- }catch{$('#check-guards').disabled=true;$('#guard-status').textContent='Cloud safeguard verification is unavailable. GPU launch stays locked.';}
-}
-$('#check-guards').addEventListener('click',async()=>{
- $('#check-guards').disabled=true;
- try{const r=await fetch('/api/controller/check',{method:'POST',headers:{'Content-Type':'application/json','X-Workstation-Request':'1'},body:'{}'});if(!r.ok)throw Error();guardPollingUntil=Date.now()+180000;await guardStatus();}
- catch{$('#guard-status').textContent='Could not start the safeguard check. No GPU was started.';$('#check-guards').disabled=false;}
-});
+import {parseBackup,backupFrom,textExport,BACKUP_LIMITS} from './recovery.js';
+import {Autosave,browserOutbox,documentFrom,reconcileTurn} from './autosave.js';
+const $=s=>document.querySelector(s),uuid=()=>crypto.randomUUID(),outbox=browserOutbox();
+let deadline=0,ready=false,busy=false,historyReady=false,controlClosed=false,replacement=null,importing=null,saveTimer,turnTimer,guardPollingUntil=0;
+let sync;
+const blank=()=>({id:uuid(),revision:0,title:'Untitled chat',messages:[],draft:''});
+const hasText=()=>sync.doc.messages.length||sync.doc.draft.trim();
+const dirty=()=>hasText()&&sync.savedEpoch!==sync.epoch;
+async function api(path,body){let r;try{r=await fetch(path,body===undefined?{cache:'no-store',signal:AbortSignal.timeout(20000)}:{method:'POST',headers:{'Content-Type':'application/json','X-Workstation-Request':'1'},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});}catch{throw Error('Connection unavailable. Your local text has not been acknowledged by the cloud.');}let data;try{data=await r.json();}catch{throw Error('Cloud response could not be verified.');}if(!r.ok){const errors={REVISION_CONFLICT:'Another tab or device changed this chat.',GENERATION_PENDING:'Another reply is still running. Your draft has been kept.',SESSION_CLOSED:'The model session has ended. Your draft is saved.',TURN_ID_REUSED:'This reply request could not be verified. Check saved history.'};const e=Error(errors[data.error]||data.error||'Cloud request failed');e.status=r.status;e.data=data;throw e;}return data;}
+function createSync(doc=blank(),key=uuid()){sync=new Autosave({doc,key,store:outbox,request:api,onChange:update});}
 function update(){
- const active=ready&&!controlClosed&&Date.now()<deadline,text=messages.length||$('#message').value.trim();
- $('#message').disabled=busy||(!active&&!historyReady);$('#send').disabled=busy||!active;
+ if(!sync)return;const active=ready&&!controlClosed&&Date.now()<deadline,text=hasText();
+ $('#message').disabled=busy||!!sync.pendingTurnId||(!active&&!historyReady);$('#send').disabled=busy||!active||!!sync.conflict||!!sync.pendingTurnId;
  for(const id of ['clear','export'])$('#'+id).disabled=busy||(id==='export'&&!text);
- $('#save').disabled=busy||!historyReady||!text||!dirty();
+ $('#save').disabled=busy||!historyReady||!text||!dirty()||!!sync.conflict;
  for(const id of ['saved','backup','restore'])$('#'+id).disabled=busy||!historyReady;
  $('#confirm-import').disabled=busy||!importing?.canImport||!importing?.importable;
- for(const id of ['discard-continue','cancel-replace'])$('#'+id).disabled=busy;$('#save-continue').disabled=busy||!historyReady;
- $('#draft-status').textContent=dirty()?'Unsaved changes. Save a snapshot or export the text before leaving.':text?'This snapshot is saved.':'Drafts stay in this tab until you save them.';
+ for(const id of ['discard-continue','cancel-replace'])$('#'+id).disabled=busy;$('#save-continue').disabled=busy||!historyReady||!!sync.conflict;
+ const status={new:hasText()?'Local draft · not yet cloud-saved. Edit it or select Save now.':'Start a chat. Messages and drafts save automatically.',saving:'Saving…',saved:'Saved to your private cloud history.',offline:'Offline · cloud save unconfirmed. Reconnect or export your text.',conflict:'Another tab or device changed this chat. Choose how to keep your local draft.',full:'Cloud history is full (20 chats). Update an existing chat, export, or delete one yourself.'};
+ $('#draft-status').textContent=(sync.pendingTurnId?'Saved message · reply is pending in the cloud. ':status[sync.status]||'Cloud save is unconfirmed.')+(sync.localError?' Local recovery is unavailable: '+sync.localError:'');
+ $('#draft-status').dataset.state=sync.status;$('#conflict-panel').hidden=!sync.conflict;$('#retry-turn').hidden=!sync.pendingTurnId||busy||!active;$('#check-turn').hidden=!sync.pendingTurnId||busy;
  $('#clock').textContent=active?`${Math.ceil((deadline-Date.now())/60000)} minutes until the session deadline`:'';
  if(ready&&!active){ready=false;$('#session').textContent='Session deadline reached. Chat is closed; cloud shutdown verification is separate.';}
 }
 function append(role,content){$('#empty')?.remove();const article=document.createElement('article'),label=document.createElement('strong'),p=document.createElement('p');article.dataset.role=role;label.textContent=role==='user'?'You':'Qwen';p.textContent=content;article.append(label,p);$('#messages').append(article);}
-async function load(){try{
- const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error();const s=await r.json();
- ready=s.chatEnabled===true&&s.agentToolsEnabled===false;deadline=Date.parse(s.deadline)||0;historyReady=s.history==='private-cloud-opt-in';
- $('#session').textContent=ready?'Private chat session is armed.':'Private chat is prepared. No session is armed.';
- $('#notice').textContent=ready?'Plain-text replies. Nothing is executed.':(s.reason||'Chat stays locked until login, inference and cloud shutdown are validated.');
-}catch{$('#session').textContent='Owner login or the cloud gateway is unavailable. Save or export your text before signing in again.';}update();}
-async function historyRequest(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Workstation-Request':'1'},body:JSON.stringify(body)}:{cache:'no-store'});const data=await r.json();if(!r.ok)throw Error(data.error||'Saved chat request failed');return data;}
-async function saveCurrent(){
- const savedMessages=draftSnapshot(messages,$('#message').value);if(!savedMessages.length||!historyReady)return false;
- busy=true;update();try{await historyRequest('/api/history/save',{title:savedMessages[0].content.slice(0,80),messages:savedMessages});markClean();$('#notice').textContent='Snapshot saved privately, including any unsent draft. It remains available with the GPU off.';return true;}
- catch(e){$('#notice').textContent=e.message;$('#unsaved-error').textContent=e.message;return false;}finally{busy=false;update();}
-}
-function guardReplacement(action){if(busy)return;if(!dirty()){action();return;}replacement=action;$('#unsaved-error').textContent='';$('#save-continue').disabled=!historyReady;$('#unsaved-dialog').showModal();}
+function renderConversation(){$('#messages').replaceChildren();for(const m of sync.doc.messages)append(m.role,m.content);$('#message').value=sync.doc.draft;update();}
+function scheduleSave(){clearTimeout(saveTimer);if(historyReady&&!sync.pendingTurnId&&!sync.conflict)saveTimer=setTimeout(()=>sync.flush().catch(e=>{$('#notice').textContent=e.message;}),600);}
+async function saveCurrent(){clearTimeout(saveTimer);if(!historyReady||!hasText()||sync.conflict)return false;try{const result=await sync.flush();if(!result)$('#unsaved-error').textContent=sync.error||'Save has not been confirmed. Export or resolve the conflict before continuing.';return result;}catch(e){$('#unsaved-error').textContent=e.message;$('#notice').textContent='Cloud save could not be confirmed. Your current text has been kept.';return false;}}
+async function load(){try{const s=await api('/api/status');ready=s.chatEnabled===true&&s.agentToolsEnabled===false;deadline=Date.parse(s.deadline)||0;historyReady=s.history==='private-cloud-opt-in';$('#session').textContent=ready?'Your private chat is ready.':'No model session is running.';$('#notice').textContent=ready?'Plain-text replies. Nothing is executed.':s.reason||'Start a timed session when the service is ready.';}catch{$('#session').textContent='Owner login or the cloud gateway is unavailable. Export your text before signing in again.';}update();}
+async function guardStatus(){try{const s=await api('/api/controller/status'),state=s.readiness,checking=['pending','checking'].includes(state?.phase);$('#check-guards').disabled=checking;
+ if(checking){$('#guard-status').textContent='Checking both cloud safeguards. This free check continues if you close the browser.';guardPollingUntil=Math.max(guardPollingUntil,state.expiresAt||0);}
+ else if(state?.phase==='verified')$('#guard-status').textContent='Last cloud heartbeat check passed'+(state.finishedAt?' at '+new Date(state.finishedAt).toLocaleString():'')+'. Every launch still requires fresh reservation checks.';
+ else if(state?.phase==='failed')$('#guard-status').textContent='Cloud safeguard verification failed. GPU launch stays locked.';
+ else $('#guard-status').textContent='This free check verifies the cloud safeguards without starting a GPU.';
+ if(checking&&Date.now()<guardPollingUntil)setTimeout(guardStatus,3000);
+ }catch{$('#check-guards').disabled=true;$('#guard-status').textContent='Cloud safeguard verification is unavailable. GPU launch stays locked.';}}
+$('#check-guards').addEventListener('click',async()=>{$('#check-guards').disabled=true;try{await api('/api/controller/check',{});guardPollingUntil=Date.now()+180000;await guardStatus();}catch{$('#guard-status').textContent='Could not start the safeguard check. No GPU was started.';$('#check-guards').disabled=false;}});
+function guardReplacement(action){if(busy)return;clearTimeout(saveTimer);if(!dirty()){action();return;}replacement=action;$('#unsaved-error').textContent='';$('#unsaved-dialog').showModal();}
 function continueReplacement(){const action=replacement;replacement=null;$('#unsaved-dialog').close();action?.();}
-$('#save-continue').addEventListener('click',async()=>{if(await saveCurrent())continueReplacement();});
-$('#discard-continue').addEventListener('click',continueReplacement);
-$('#cancel-replace').addEventListener('click',()=>{replacement=null;$('#unsaved-dialog').close();});
-$('#unsaved-dialog').addEventListener('cancel',()=>{replacement=null;});
-window.addEventListener('beforeunload',event=>{if(dirty()){event.preventDefault();event.returnValue='';}});
-$('#composer').addEventListener('submit',async event=>{event.preventDefault();if(busy||!ready||Date.now()>=deadline)return;
- const content=$('#message').value.trim();if(!content)return;const candidate=[...messages,{role:'user',content}];
- if(candidate.length>25||candidate.reduce((n,m)=>n+m.content.length,0)>6000){$('#notice').textContent='This conversation is full. Save or export it, then start a new chat.';return;}
- busy=true;update();$('#notice').textContent='Qwen is replying…';
- try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-Workstation-Request':'1'},body:JSON.stringify({messages:candidate})});
-  if(!r.ok){$('#notice').textContent=(await r.json()).error||'Reply unavailable. Retry manually.';if([401,409,503].includes(r.status))ready=false;return;}
-  const reply=await r.json();if(typeof reply.content!=='string')throw Error();
-  messages=[...candidate,{role:'assistant',content:reply.content}];append('user',content);append('assistant',reply.content);$('#message').value='';
-  $('#notice').textContent=reply.finishReason==='length'?'Reply reached the length limit.':'Reply complete. No actions were executed.';
- }catch{$('#notice').textContent='Connection interrupted. No automatic retry; your message is still in the composer.';}finally{busy=false;update();}
-});
-$('#clear').addEventListener('click',()=>guardReplacement(()=>{messages=[];$('#messages').replaceChildren();$('#message').value='';markClean();$('#notice').textContent='New chat. The session deadline has not changed.';}));
+$('#save-continue').addEventListener('click',async()=>{if(await saveCurrent())continueReplacement();});$('#discard-continue').addEventListener('click',async()=>{try{await outbox.remove(sync.key);}catch{}continueReplacement();});$('#cancel-replace').addEventListener('click',()=>{replacement=null;$('#unsaved-dialog').close();scheduleSave();});$('#unsaved-dialog').addEventListener('cancel',()=>{replacement=null;scheduleSave();});
+window.addEventListener('beforeunload',event=>{if(dirty()||sync.pendingTurnId){event.preventDefault();event.returnValue='';}});
+async function finishTurn(job){if(job.turnId!==sync.pendingTurnId)throw Error('Reply identity could not be verified');if(job.status==='pending')return false;if(!['completed','failed','interrupted'].includes(job.status)||!job.item)throw Error('Reply status could not be verified');const latest=await api('/api/history/'+encodeURIComponent(sync.doc.id)),merged=reconcileTurn(sync.snapshot(),job,latest);if(merged.conflict){sync.pendingTurnId=null;sync.conflict=merged.item;sync.status='conflict';await sync.persist();busy=false;update();$('#notice').textContent='The reply finished, but newer local text needs review. Your local text has been kept.';return true;}await sync.accept(merged.item);busy=false;renderConversation();$('#notice').textContent=job.status==='completed'?'Reply complete and saved. No actions were executed.':job.status==='interrupted'?'The reply was interrupted. Your draft is saved; send again only when you choose.':'The reply failed. Your draft is saved; no automatic generation retry ran.';await showLocalRecovery();return true;}
+async function pollTurn(){clearTimeout(turnTimer);if(!sync.pendingTurnId)return;const id=sync.pendingTurnId;try{const job=await api('/api/turns/'+encodeURIComponent(id));if(id!==sync.pendingTurnId)return;if(await finishTurn(job))return;turnTimer=setTimeout(pollTurn,2000);}catch(e){busy=false;update();$('#notice').textContent=e.status===404?'Send was not confirmed. Check the reply or explicitly retry the same request.':'Connection interrupted. The cloud reply may still be running. Check its status; no new generation is sent automatically.';}}
+async function submitTurn(retry=false){
+ if(busy||!ready||Date.now()>=deadline||sync.conflict)return;
+ if(!retry){const content=sync.doc.draft.trim();if(!content)return;const candidate=[...sync.doc.messages,{role:'user',content}];if(candidate.length>25||candidate.reduce((n,m)=>n+m.content.length,0)>6000){$('#notice').textContent='This conversation is full for inference. Its text is saved; start a new chat to continue.';return;}busy=true;update();if(!await saveCurrent()){busy=false;update();return;}await sync.pending(uuid());}
+ if(!sync.pendingTurnId)return;const id=sync.pendingTurnId;busy=true;update();$('#notice').textContent='Qwen is replying in the cloud. You may return to saved history later.';
+ try{const result=await api('/api/turns',{conversationId:sync.doc.id,revision:sync.doc.revision,turnId:id});if(result.turnId!==id)throw Error('Reply identity could not be verified');await pollTurn();}
+ catch(e){busy=false;if(e.status&&![401,408,500,502,503,504].includes(e.status)){sync.pendingTurnId=null;if(e.status===409&&e.data?.error==='REVISION_CONFLICT'&&e.data.item){sync.conflict=documentFrom(e.data.item);sync.status='conflict';}await sync.persist();}update();$('#notice').textContent=e.message+' No automatic generation retry.';if(sync.pendingTurnId)await pollTurn();}
+}
+$('#composer').addEventListener('submit',event=>{event.preventDefault();submitTurn().catch(e=>{$('#notice').textContent=e.message;busy=false;update();});});
+$('#check-turn').addEventListener('click',()=>{busy=true;update();pollTurn();});
+$('#retry-turn').addEventListener('click',()=>{if(!ready){pollTurn();return;}if(window.confirm('Retry this same reply request? Its identifier is reused so an existing job is not generated twice.'))submitTurn(true).catch(e=>{$('#notice').textContent=e.message;});});
+$('#clear').addEventListener('click',()=>guardReplacement(()=>{createSync();renderConversation();$('#notice').textContent='New chat. The session deadline has not changed.';}));
 function download(content,type,filename){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-$('#export').addEventListener('click',()=>{const text=textExport(messages,$('#message').value);if(text)download(text,'text/plain;charset=utf-8','unjailed-chat.txt');});
-$('#save').addEventListener('click',()=>{if(!busy)saveCurrent();});
-async function showSaved(){if(busy||!historyReady)return;busy=true;update();try{
- const data=await historyRequest('/api/history'),list=$('#saved-list');list.replaceChildren();$('#saved-panel').hidden=false;
+$('#export').addEventListener('click',()=>{const text=textExport(sync.doc.messages,sync.doc.draft);if(text)download(text,'text/plain;charset=utf-8','unjailed-chat.txt');});$('#save').addEventListener('click',()=>saveCurrent().catch(e=>{$('#notice').textContent=e.message;}));
+$('#use-cloud').addEventListener('click',async()=>{if(!sync.conflict||!window.confirm('Discard this local draft and load the cloud version? Export the local text first if you need it.'))return;await sync.accept(sync.conflict);renderConversation();});
+$('#fork-local').addEventListener('click',async()=>{if(!sync.conflict)return;await sync.fork(uuid(),sync.key);update();await sync.flush();});
+async function showLocalRecovery(){const list=$('#local-list');list.replaceChildren();try{const records=await outbox.list();$('#local-panel').hidden=!records.length;for(const record of records){const row=document.createElement('div'),label=document.createElement('p'),restore=document.createElement('button'),remove=document.createElement('button');label.textContent=record.title+(record.pendingTurnId?' · reply may be pending':' · local changes');restore.textContent='Recover';remove.textContent='Clear local copy';restore.addEventListener('click',()=>guardReplacement(async()=>{createSync();await sync.restore(record);renderConversation();if(sync.pendingTurnId){busy=true;update();await pollTurn();}else scheduleSave();}));remove.addEventListener('click',async()=>{if(window.confirm('Clear only this local recovery copy? Export it first if it is not saved in the cloud.')){await outbox.remove(record.key);await showLocalRecovery();}});row.append(label,restore,remove);list.append(row);}}catch(e){$('#local-panel').hidden=false;list.textContent=e.message;}}
+async function showSaved(){if(busy||!historyReady)return;busy=true;update();try{const data=await api('/api/history'),list=$('#saved-list');list.replaceChildren();$('#saved-panel').hidden=false;
  if(!data.items.length){const p=document.createElement('p');p.textContent='No chats saved yet.';list.append(p);}
- for(const item of data.items){const row=document.createElement('div'),title=document.createElement('p'),open=document.createElement('button'),remove=document.createElement('button');title.textContent=item.title;open.textContent='Open';remove.textContent='Delete';
-  open.addEventListener('click',()=>guardReplacement(async()=>{busy=true;update();try{
-   const raw=await historyRequest('/api/history/'+encodeURIComponent(item.id)),c=chatFrom({title:raw.title,messages:raw.messages});messages=c.messages;
-   const draft=messages.at(-1)?.role==='user'?messages.pop().content:'';$('#message').value=draft;$('#messages').replaceChildren();for(const m of messages)append(m.role,m.content);markClean();
-   $('#notice').textContent=draft?'Draft restored. An active GPU session is required to send it.':'Saved chat opened. The session deadline has not changed.';
-  }catch(e){$('#notice').textContent=e.message;}finally{busy=false;update();}}));
-  remove.addEventListener('click',async()=>{if(busy||!window.confirm('Permanently delete this saved snapshot? Back it up first if you need a copy.'))return;busy=true;update();try{await historyRequest('/api/history/delete',{id:item.id});row.remove();$('#notice').textContent='Saved snapshot deleted. Any open text remains in this tab.';clean=draftFingerprint([], '');}catch(e){$('#notice').textContent=e.message;}finally{busy=false;update();}});
-  row.append(title,open,remove);list.append(row);
- }
-}catch(e){$('#notice').textContent=e.message;}finally{busy=false;update();}}
+ for(const item of data.items){const row=document.createElement('div'),title=document.createElement('p'),open=document.createElement('button'),remove=document.createElement('button');title.textContent=item.title;open.textContent='Open';remove.textContent='Delete';open.addEventListener('click',()=>guardReplacement(async()=>{busy=true;update();try{const raw=await api('/api/history/'+encodeURIComponent(item.id));createSync(documentFrom(raw));renderConversation();$('#notice').textContent='Saved chat opened. Drafts can be edited with the GPU off.';}catch(e){$('#notice').textContent=e.message;}finally{busy=false;update();}}));remove.addEventListener('click',async()=>{if(busy||!window.confirm('Permanently delete this saved chat? Back it up first if you need a copy.'))return;busy=true;update();try{await api('/api/history/delete',{id:item.id});row.remove();if(sync.doc.id===item.id){clearTimeout(saveTimer);await sync.fork(uuid(),sync.key);sync.status='new';}$('#notice').textContent='Saved chat deleted. Any open text remains local until you choose to save it as a new chat.';}catch(e){$('#notice').textContent=e.message;}finally{busy=false;update();}});row.append(title,open,remove);list.append(row);}
+ }catch(e){$('#notice').textContent=e.message;}finally{busy=false;update();}}
 $('#saved').addEventListener('click',showSaved);
-$('#backup').addEventListener('click',async()=>{if(busy||!historyReady)return;busy=true;update();try{
- const backup=backupFrom(await historyRequest('/api/history/backup'));download(JSON.stringify(backup,null,2),'application/json','unjailed-chats-'+new Date().toISOString().slice(0,10)+'.json');$('#backup-status').textContent=`Downloaded ${backup.conversations.length} saved snapshots. Unsaved text is not included; keep the file somewhere you trust.`;
-}catch(e){$('#backup-status').textContent=e.message;}finally{busy=false;update();}});
-$('#restore').addEventListener('click',()=>{if(!busy)$('#backup-file').click();});
-$('#backup-file').addEventListener('change',async()=>{const file=$('#backup-file').files[0];$('#backup-file').value='';if(!file||busy)return;
- importing=null;$('#import-panel').hidden=true;busy=true;update();try{
- if(file.size>BACKUP_LIMITS.bytes)throw Error('Backup exceeds 2 MiB');const backup=parseBackup(await file.text()),preview=await historyRequest('/api/history/import/preview',backup);importing={backup,...preview};
- $('#import-summary').textContent=`${preview.importable} new snapshots; ${preview.duplicates} identical snapshots skipped; ${preview.remainingSlots} slots available.`+(preview.canImport?'':' Not enough space: nothing will be imported.');
- const list=$('#import-list');list.replaceChildren();for(const c of backup.conversations){const li=document.createElement('li');li.textContent=c.title+' · '+c.messages.length+' messages';list.append(li);}$('#import-panel').hidden=false;$('#backup-status').textContent='Preview only. No chats have been imported.';
-}catch(e){$('#backup-status').textContent=e.message;}finally{busy=false;update();}});
-$('#confirm-import').addEventListener('click',async()=>{if(busy||!importing?.canImport||!importing?.importable)return;busy=true;update();try{
- const result=await historyRequest('/api/history/import',importing.backup);$('#backup-status').textContent=`Imported ${result.imported} snapshots; skipped ${result.duplicates} identical snapshots. Your open chat and session timer have not changed.`;importing=null;$('#import-panel').hidden=true;
-}catch(e){$('#backup-status').textContent=e.message+' No automatic retry.';}finally{busy=false;update();}});
-$('#cancel-import').addEventListener('click',()=>{if(busy)return;importing=null;$('#import-panel').hidden=true;$('#backup-status').textContent='Import cancelled. No saved chats changed.';update();});
-$('#message').addEventListener('input',update);
-window.addEventListener('session-state',event=>{const s=event.detail;if(s?.phase==='ready'&&!s.stopRequested){controlClosed=false;if(!ready)load();}else if(s){controlClosed=true;ready=false;$('#session').textContent=s.phase==='stopped'?'Session ended; GPU cleanup verified.':'Chat is closed while the session is '+s.phase+'.';update();}});
-setInterval(update,1000);load();guardStatus();
+$('#backup').addEventListener('click',async()=>{if(busy||!historyReady)return;if(dirty()&&!await saveCurrent()){$('#backup-status').textContent='Current changes are not cloud-saved. Export the open text separately; backup has not started.';return;}busy=true;update();try{const backup=backupFrom(await api('/api/history/backup'));download(JSON.stringify(backup,null,2),'application/json','unjailed-chats-'+new Date().toISOString().slice(0,10)+'.json');$('#backup-status').textContent=`Downloaded ${backup.conversations.length} saved chats and drafts. Keep this private file somewhere you trust.`;}catch(e){$('#backup-status').textContent=e.message;}finally{busy=false;update();}});
+$('#restore').addEventListener('click',()=>{if(!busy)$('#backup-file').click();});$('#backup-file').addEventListener('change',async()=>{const file=$('#backup-file').files[0];$('#backup-file').value='';if(!file||busy)return;importing=null;$('#import-panel').hidden=true;busy=true;update();try{if(file.size>BACKUP_LIMITS.bytes)throw Error('Backup exceeds 2 MiB');const backup=parseBackup(await file.text()),preview=await api('/api/history/import/preview',backup);importing={backup,...preview};$('#import-summary').textContent=`${preview.importable} new chats; ${preview.duplicates} identical chats skipped; ${preview.remainingSlots} slots available.`+(preview.canImport?'':' Not enough space: nothing will be imported.');const list=$('#import-list');list.replaceChildren();for(const c of backup.conversations){const li=document.createElement('li');li.textContent=c.title+' · '+c.messages.length+' messages'+(c.draft?' · draft':'');list.append(li);}$('#import-panel').hidden=false;$('#backup-status').textContent='Preview only. No chats have been imported.';}catch(e){$('#backup-status').textContent=e.message;}finally{busy=false;update();}});
+$('#confirm-import').addEventListener('click',async()=>{if(busy||!importing?.canImport||!importing?.importable)return;busy=true;update();try{const result=await api('/api/history/import',importing.backup);$('#backup-status').textContent=`Imported ${result.imported} chats; skipped ${result.duplicates} identical chats. Your open chat and session timer have not changed.`;importing=null;$('#import-panel').hidden=true;}catch(e){$('#backup-status').textContent=e.message+' No automatic retry.';}finally{busy=false;update();}});$('#cancel-import').addEventListener('click',()=>{if(busy)return;importing=null;$('#import-panel').hidden=true;$('#backup-status').textContent='Import cancelled. No saved chats changed.';update();});
+$('#message').addEventListener('input',()=>{try{const draft=$('#message').value,title=!sync.doc.messages.length?draft.trim().slice(0,80)||'Untitled chat':sync.doc.title;sync.edit({draft,title});scheduleSave();}catch(e){$('#message').value=sync.doc.draft;$('#notice').textContent=e.message;}});
+window.addEventListener('online',()=>{if(sync.pendingTurnId)pollTurn();else scheduleSave();});window.addEventListener('session-state',event=>{const s=event.detail;if(s?.phase==='ready'&&!s.stopRequested){controlClosed=false;if(!ready)load();}else if(s){controlClosed=true;ready=false;$('#session').textContent=s.phase==='stopped'?'Session ended; GPU cleanup verified.':'Chat is closed while the session is '+s.phase+'.';update();}});
+createSync();setInterval(update,1000);load();guardStatus();showLocalRecovery();

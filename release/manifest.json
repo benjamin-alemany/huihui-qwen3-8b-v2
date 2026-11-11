@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "unjailed-chat-v1",
+  "status": "unverified",
+  "model": {
+    "repository": "huihui-ai/Huihui-Qwen3-8B-abliterated-v2",
+    "revision": "7d89db76029281fd8f3e6698a8e30738608105a9",
+    "servedName": "huihui-qwen3-8b-v2"
+  },
+  "artifact": {
+    "reusableOfflineBase": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:436f9088dac4df3b77e18c3dbf284bf736be85628385e187d2c41d28b43c37fa",
+    "servingImage": null,
+    "runtimeProfile": "vm-inference-v1",
+    "bootstrapLockSha256": null
+  },
+  "hosting": {
+    "provider": "hyperstack",
+    "flavor": "n3-RTX-A6000x1",
+    "region": "CANADA-1",
+    "vmImageId": null,
+    "vmImageName": "Ubuntu Server 24.04 LTS (Noble Numbat)",
+    "driverBranch": 580
+  },
+  "inference": {
+    "origin": "https://inference.unjailed.work",
+    "completionPath": "/v1/chat/completions",
+    "healthPath": "/health"
+  },
+  "sessions": {
+    "allowedMinutes": [
+      15,
+      30,
+      60
+    ],
+    "defaultMinutes": 30,
+    "maximumStartupMinutes": 15,
+    "backupDelayMinutes": 1,
+    "cleanupMarginMinutes": 5
+  },
+  "legacyValidation": {
+    "image": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:f4fda4da17fe00a8188527d3a774dcc487529b63fe2e10359912d24d4ee83761",
+    "gpu": "NVIDIA A40",
+    "minutes": 18,
+    "diskGB": 60
+  }
+}

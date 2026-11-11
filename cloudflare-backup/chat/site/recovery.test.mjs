@@ -14,3 +14,13 @@ test('import skips exact snapshots, preserves same-title different content and c
  const p=importPlan(Array(20).fill(c),bundle([other]));assert.equal(p.canImport,false);assert.equal(p.remainingSlots,0);
 });
 test('text export includes a draft-only chat and fingerprints reflect meaningful edits',()=>{assert.equal(textExport([],' Cedar '),'UNSENT DRAFT\nCedar');assert.ok(textExport(c.messages,'unsent').endsWith('UNSENT DRAFT\nunsent'));assert.notEqual(draftFingerprint([],''),draftFingerprint([],'Cedar'));assert.equal(draftFingerprint([],'Cedar'),draftFingerprint([],' Cedar '));});
+
+test('version-two backups preserve draft-only documents and migrate equivalent legacy snapshots for deduplication',()=>{
+ const v2={format:'unjailed.chat-backup',version:2,conversations:[{title:'Draft',messages:[],draft:'  exact unsent text  '}]};
+ assert.deepEqual(parseBackup(JSON.stringify(v2)),v2);
+ assert.equal(importPlan(v2.conversations,bundle([{title:'Draft',messages:[{role:'user',content:'  exact unsent text  '}]}])).duplicates,1);
+});
+test('version-two backups reject executable/control fields and incomplete committed exchanges',()=>{
+ const v2=conversations=>({format:'unjailed.chat-backup',version:2,conversations});
+ for(const chat of [{title:'Bad',messages:[],draft:'x',RUNPOD_API_KEY:'DUMMY'},{title:'Bad',messages:[{role:'user',content:'Unfinished'}],draft:''},{title:'Large',messages:[],draft:'x'.repeat(12001)}])assert.throws(()=>backupFrom(v2([chat])));
+});

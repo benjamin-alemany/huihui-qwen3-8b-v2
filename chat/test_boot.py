@@ -28,6 +28,15 @@ class BootTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 boot.deadline_from(dict(self.env, **patch), self.now)
 
+    def test_sixty_minute_product_limit_never_allows_ten_hours_or_expired_boot(self):
+        env = dict(self.env, CHAT_DEADLINE_UTC="2026-11-01T13:00:00Z")
+        self.assertEqual(boot.deadline_from(env, self.now), self.now-1+3600)
+        for end in ("2026-11-01T13:00:01Z", "2026-11-01T22:00:00Z"):
+            with self.assertRaises(ValueError):
+                boot.deadline_from(dict(env, CHAT_DEADLINE_UTC=end), self.now)
+        with self.assertRaises(ValueError):
+            boot.deadline_from(env, self.now-1+3600)
+
 
 if __name__ == "__main__":
     unittest.main()
