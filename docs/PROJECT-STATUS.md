@@ -4,7 +4,7 @@ The goal is private browser chat with the pinned Huihui Qwen3 8B v2 model, owner
 
 ## Current evidence
 
-- The existing Cloudflare interface, controller and independent shutdown resources are deployed. Paid Start, guard arming, inference and ordinary-use allowance remain off. Both source release approval pins are null.
+- The existing Cloudflare interface, controller and independent shutdown resources are deployed. Ordinary-use allowance and agent tools remain off. The source acceptance pin is limited to one separately approved candidate; private one-use authorization, budget and both guard gates still precede creation. Production approval remains closed.
 - The single approved Hyperstack RTX A6000 allocation failed the provider identity gate: its readback returned `labels:[]` despite optional labels being requested. No model permit was issued. That attempt established no native CUDA or Qwen result.
 - The exact allocation was manually deleted. Fresh structured absence and complete inventory checks were followed by operator-specific cloud reconciliation of the controller and both guards. The failure and truthful empty-label readback remain recorded; keyless reconciliation receipts were archived, and session keys and guard key copies were cleared. This was a known-created, manually deleted attempt, not a no-create outcome or a passed acceptance.
 - Earlier Runpod CUDA/network-boundary failures are separate historical evidence; see `CUDA-DRIVER-RUNPOD-FINDINGS.md`. The pinned offline serving artifact passed free published-artifact checks, but the current Hyperstack runtime still needs native validation.

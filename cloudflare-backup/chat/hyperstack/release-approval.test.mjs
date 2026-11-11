@@ -7,6 +7,7 @@ test('release authorization binds ownership V2 in addition to unchanged artifact
  assert.equal(manifest.hosting.ownershipPolicy,'nonce-name-v2');assert.equal(matchesReleasePin(manifest,pin()),true);
  for(const value of [undefined,'label-v1','nonce-name-v3']){const p=pin();if(value===undefined)delete p.ownershipPolicy;else p.ownershipPolicy=value;assert.equal(matchesReleasePin(manifest,p),false);const r=structuredClone(manifest);if(value===undefined)delete r.hosting.ownershipPolicy;else r.hosting.ownershipPolicy=value;assert.equal(matchesReleasePin(r,pin()),false);}
 });
-test('ownership V2 preparation never authorizes another native attempt or production session',()=>{
- assert.equal(APPROVED_ACCEPTANCE_RELEASE,null);assert.equal(ACCEPTED_PRODUCTION_RELEASE,null);assert.equal(releaseApprovedFor('acceptance',manifest),false);assert.equal(releaseApprovedFor('production',{...manifest,status:'verified'}),false);
+test('source acceptance is limited to the exact owner-approved candidate and cannot authorize production',()=>{
+ assert.equal(matchesReleasePin(manifest,APPROVED_ACCEPTANCE_RELEASE),true);assert.equal(ACCEPTED_PRODUCTION_RELEASE,null);assert.equal(releaseApprovedFor('acceptance',manifest),true);assert.equal(releaseApprovedFor('production',{...manifest,status:'verified'}),false);
+ for(const field of ['servingImage','bootstrapBundleSha256','bootstrapSourceCommit']){const changed=structuredClone(manifest);changed.artifact[field]='unreviewed';assert.equal(releaseApprovedFor('acceptance',changed),false);}
 });

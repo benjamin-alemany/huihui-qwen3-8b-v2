@@ -6,7 +6,7 @@ bootstrap package lock, bundle digest, compressed size, source commit and runtim
 orchestrator are pinned. The exact image passed free published-artifact checks
 for copied code, offline cache and runtime imports; native acceptance is pending.
 The one-allocation acceptance stopped at provider reservation identity readback,
-before model permission. Both source approval pins are null again. No native
+before model permission. The source acceptance pin is limited to the exact separately owner-approved candidate; production approval remains closed. No native
 CUDA/model result is established by that attempt. Account catalog IDs and
 passing CPU tests do not prove driver, toolkit, container or model compatibility.
 
@@ -45,5 +45,5 @@ record are historical evidence, not V2 reservations or permission to retry.
 
 The ownership-only repair left VM/bootstrap/serving artifacts unchanged.
 The subsequent bounded host-progress preparation refreshes the root-host bundle
-for diagnostics; it leaves the serving image, model and isolation policy unchanged. Both approval pins remain null. V2 has only
+for diagnostics; it leaves the serving image, model and isolation policy unchanged. Production approval remains closed; the source acceptance pin alone does not authorize a create. V2 has only
 local CPU/dummy coverage until separately approved native acceptance succeeds.
