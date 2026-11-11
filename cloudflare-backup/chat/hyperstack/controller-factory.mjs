@@ -6,6 +6,7 @@ import {SessionError,parseOriginalAcceptance} from '../controller/session-policy
 import {hyperstackClient} from './client.mjs';
 import {hyperstackLifecycle} from './controller-policy.mjs';
 import {runtimeHandshake} from './runtime-handshake.mjs';
+import {collectHostDiagnostics} from './host-diagnostics.mjs';
 import {INFERENCE_ORIGIN,creationTimestampIdentity,validateTarget,validateReservation} from './policy.mjs';
 
 const LEDGER='session-ledger-v1',HOST_READY_PATH='/__unjailed/host-ready';
@@ -110,9 +111,11 @@ export function hyperstackControllerFactory({env,storage,release=manifest,bundle
  const configReady=!!(target&&lifecycle&&keyConfigured),lockedCode=blockers[0]??'HYPERSTACK_LAUNCH_LOCKED';
  const deny=async()=>refused(lockedCode);
  let provider=Object.freeze({catalog:deny,list:deny,get:deny,create:deny,cleanup:deny,health:async()=>false});
- if(configReady)provider=hyperstackClient(key,{target,now,fetchImpl,
+ if(configReady){provider=hyperstackClient(key,{target,now,fetchImpl,
   bootstrapFor:boundBootstrapFor({storage,target,release,bundle,renderBootstrap:env?.START_ENABLED==='true'&&blockers.length===0?renderBootstrap:null,hostTunnelCredential,now}),
   verifyHealth:runtimePrepared&&sourceApproved?runtimeHandshake({storage,target,release,lifecycle,sessionChecked,verifyHostGatewayReceipt,sealFirewall:(allocation,reservation)=>provider.sealFirewall(allocation,reservation),fetchImpl,now}):async()=>false});
+  provider.diagnostics=(allocation,reservation,sessionId)=>collectHostDiagnostics({key,allocation,reservation,sessionId,providerGet:id=>provider.get(id),fetchImpl,now});
+ }
  return Object.freeze({provider,lifecycle:lifecycle??unavailableLifecycle(lockedCode),operatorBudget,originalAcceptance,validationMode,connected:configReady,key:keyConfigured?key:undefined,
   enabled:env?.START_ENABLED==='true'&&blockers.length===0,
   catalog:configReady?()=>provider.catalog():deny,

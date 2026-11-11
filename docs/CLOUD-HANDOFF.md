@@ -6,9 +6,9 @@ Implement the approved private-chat product plan: pinned Qwen, owner-confirmed t
 
 The existing Cloudflare interface/controller and shutdown resources are deployed with paid Start, guard arming, inference, ordinary allowance and agent tools off. Both source release approval pins are null. The single approved Hyperstack A6000 attempt failed the provider identity readback gate because optional requested labels returned empty. No model permit was issued; CUDA and Qwen remain untested on this target. The exact allocation was manually deleted and operator-specific controller/guard cloud reconciliation verified. Retain that truthful created/deleted failure record; never recast it as no-create or a successful acceptance.
 
-The prepared V2 candidate uses a versioned protocol: `nonce-name-v2` binds the full random nonce-bearing name, exact target and UTC window, then retains durable allocation IDs. Legacy reservations without the field keep the original strict V1 label predicate. Each actual guard must explicitly prove the V2 policy and its current Worker version for the exact reservation before paid creation. Neither a version ID alone nor a historical V1 record is sufficient. The ownership repair leaves VM/bootstrap/model artifacts unchanged and does not establish native compatibility.
+The prepared V2 candidate uses a versioned protocol: `nonce-name-v2` binds the full random nonce-bearing name, exact target and UTC window, then retains durable allocation IDs. Legacy reservations without the field keep the original strict V1 label predicate. Each actual guard must explicitly prove the V2 policy and its current Worker version for the exact reservation before paid creation. Neither a version ID alone nor a historical V1 record is sufficient. The ownership repair leaves VM/bootstrap/model artifacts unchanged and does not establish native compatibility. Subsequent host-progress preparation refreshes the trusted host bundle for bounded, keyless console diagnostics; the serving image, checkpoint, isolation policy and timers remain unchanged. Diagnostics never grant health or a model permit. Actual provider console capture remains a native check.
 
-No paid retry is authorized. Continue bounded free source preparation and review; a new native allocation requires a fresh quoted plan and explicit approval. Do not restart the former Runpod compatibility experiments.
+No paid retry is authorized. Continue bounded free source preparation and review; a new native allocation requires a fresh quoted plan and explicit approval. The current execution sequence is in [the single-allocation Hyperstack runbook](HYPERSTACK-CHAT-ACCEPTANCE.md); its thirty-minute session has a fifteen-minute startup cutoff. Do not restart the former Runpod compatibility experiments.
 
 Free code changes do not authorize credit purchases, subscriptions, auto-pay, paid resources, production unlocks or agent execution. Paid acceptance and provider funding retain their separate explicit approval requirements. The owner must complete account/legal/payment actions. Keep all real credentials out of this development checkout and all public evidence.
 
@@ -52,7 +52,7 @@ See `docs/TESTING-AND-RECOVERY.md` for the hardened workflow. Run
 Setup and test phases are separate. Neither phase deploys, downloads a model or
 starts a GPU. Review dependency/runtime risks before executing untrusted changes.
 
-Latest local evidence: 264 Node, 25 chat, 17 controller and 20 guard checks passed; 59 Python tests ran with one skip. These CPU/dummy results do not validate the target VM or release the product.
+Latest local evidence: 293 Node, 25 chat, 17 controller and 20 guard checks passed; 62 Python tests ran with one skip. These CPU/dummy results do not validate the target VM or release the product.
 
 The earlier production-source suite also replayed private real tail exports. In this
 public copy that one fixture case uses sanitized scheduled-tail data, so it is

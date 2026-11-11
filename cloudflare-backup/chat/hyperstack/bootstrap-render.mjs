@@ -3,7 +3,7 @@ import {validateReservation} from './policy.mjs';
 
 // Static source paths only. This is a gzip JSON file map, not an executable tar
 // archive; links, modes, owners and arbitrary destinations cannot be supplied.
-export const BOOTSTRAP_FILES=Object.freeze(['bootstrap.py','bootstrap.service','host_policy.py','metadata.py','packages.lock.json','daemon.json','deadline.py','keys/cuda.gpg','keys/docker.gpg','keys/toolkit.gpg']);
+export const BOOTSTRAP_FILES=Object.freeze(['bootstrap.py','bootstrap.service','console_diagnostics.py','host_policy.py','metadata.py','packages.lock.json','daemon.json','deadline.py','keys/cuda.gpg','keys/docker.gpg','keys/toolkit.gpg']);
 export const RUNTIME_FILES=Object.freeze(['attestation.py','native_attest.py','attach_model_network.py','attach_model_network.sh','seal_boundary.py','boundary.service','tunnel.service','run.py','runtime.service','gateway.py','gateway.service','preflight.py','egress_probe.py','linux_fixture.py','linux_fixture.sh','inference_policy.py','cloudflared.lock.json']);
 const ALLOWED=Object.freeze([...BOOTSTRAP_FILES,...RUNTIME_FILES]);
 const MAX_EXPANDED=256*1024,MAX_COMPRESSED=256*1024,MAX_FILE=128*1024;

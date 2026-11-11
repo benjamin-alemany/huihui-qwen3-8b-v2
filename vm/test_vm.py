@@ -1,4 +1,7 @@
-import copy,datetime as dt,hashlib,json,sys,tempfile,unittest
+import copy,datetime as dt,hashlib,io,json,os,stat,sys,tempfile,unittest
+from contextlib import redirect_stdout,redirect_stderr
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from host_policy import manifest_from,progress,docker_arguments,nftables,deadline_units,Refused
@@ -6,9 +9,38 @@ from metadata import verify_index,Refused as MetadataRefused
 from attach_model_network import owned
 from attestation import context_digest,verify_receipt
 from native_attest import mounts_from,verify_sockets,same_bind,reviewed_gpu_file
+import console_diagnostics as diagnostics
 HERE=Path(__file__).resolve().parent
 class PreparedVMTests(unittest.TestCase):
  def fixture(self):return {'version':1,'sessionId':'11111111-1111-4111-8111-111111111111','nonce':'c'*32,'createdAt':'2026-11-11T12:00:00Z','deadlineUTC':'2026-11-11T12:30:00Z','image':'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'1'*64,'resources':{'vmId':123,'publicIpAddress':'203.0.113.1','volumeIds':[]}}
+ def test_keyless_console_events_project_only_context_and_allowlisted_stage(self):
+  m=self.fixture();at=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp()+1
+  raw=diagnostics.event(m,'bootstrap','driver-check','failed',at)
+  self.assertLessEqual(len(raw),1024)
+  value=json.loads(raw.decode().strip().removeprefix(diagnostics.PREFIX))
+  self.assertEqual(set(value),{'version','sessionId','nonce','component','phase','status','at','deadline'})
+  self.assertEqual(value['deadline'],round((at-1+1800)*1000));self.assertEqual(value['phase'],'driver-check')
+  for secret in [m['image'],'resources','publicIpAddress','gatewayKey','modelKey','api_key']:self.assertNotIn(secret,raw.decode())
+  for component,phase,status in [('runtime','DUMMY_SECRET','failed'),('unknown','ready','passed'),('runtime','ready','DUMMY_SECRET')]:
+   with self.assertRaises(ValueError):diagnostics.event(m,component,phase,status,at)
+  for bad in [True,float('nan'),float('inf'),at-2,at+1800]:
+   with self.assertRaises(ValueError):diagnostics.event(m,'runtime','ready','passed',bad)
+ def test_console_emitter_writes_only_fixed_root_character_devices_without_blocking_or_links(self):
+  m=self.fixture();at=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp()+1;writes=[]
+  def write(fd,raw):writes.append((fd,raw));return len(raw)
+  with patch.object(diagnostics.time,'time',return_value=at),patch.object(diagnostics.os,'geteuid',return_value=0),patch.object(diagnostics.os,'open',return_value=91) as opened,patch.object(diagnostics.os,'fstat',return_value=SimpleNamespace(st_uid=0,st_mode=stat.S_IFCHR)),patch.object(diagnostics.os,'write',side_effect=write),patch.object(diagnostics.os,'close') as closed:
+   self.assertTrue(diagnostics.emit(m,'runtime','image-pull'))
+  self.assertEqual([c.args[0] for c in opened.call_args_list],list(diagnostics.DEVICES));self.assertEqual(len(writes),3);self.assertEqual(closed.call_count,3)
+  for call in opened.call_args_list:
+   for flag in [os.O_NOFOLLOW,os.O_NOCTTY,os.O_NONBLOCK,os.O_CLOEXEC]:self.assertTrue(call.args[1]&flag)
+  self.assertTrue(all(raw==writes[0][1] for _,raw in writes))
+ def test_console_diagnostics_cannot_emit_regular_files_or_raw_failures(self):
+  m=self.fixture();at=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp()+1;output=io.StringIO()
+  with patch.object(diagnostics.time,'time',return_value=at),patch.object(diagnostics.os,'geteuid',return_value=0),patch.object(diagnostics.os,'open',return_value=92),patch.object(diagnostics.os,'fstat',return_value=SimpleNamespace(st_uid=0,st_mode=stat.S_IFREG)),patch.object(diagnostics.os,'write') as write,patch.object(diagnostics.os,'close'),redirect_stdout(output),redirect_stderr(output):
+   self.assertFalse(diagnostics.emit(m,'runtime','sealing','failed'));write.assert_not_called()
+  with patch.object(diagnostics.time,'time',return_value=at),patch.object(diagnostics.os,'geteuid',return_value=0),patch.object(diagnostics.os,'open',side_effect=OSError('DUMMY_PRIVATE_KEY_IN_RAW_ERROR')),redirect_stdout(output),redirect_stderr(output):
+   self.assertFalse(diagnostics.emit(m,'runtime','sealing','failed'))
+  self.assertEqual(output.getvalue(),'')
  def test_manifest_rejects_hidden_credentials_or_resources(self):
   for patch in [{'RUNPOD_API_KEY':'DUMMY'},{'deadlineUTC':'2026-11-11T13:01:00Z'},{'resources':{'vmId':123,'publicIpAddress':None,'volumeIds':['unexpected']}}]:
    m={**self.fixture(),**patch}

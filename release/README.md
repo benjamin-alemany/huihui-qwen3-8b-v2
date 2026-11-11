@@ -43,6 +43,7 @@ provider labels remain truthful diagnostic data. Absent ownership policy retains
 the old label-based V1 predicate. The failed V1 attempt and its operator cleanup
 record are historical evidence, not V2 reservations or permission to retry.
 
-This controller ownership change leaves the pinned VM code, bootstrap bundle,
-serving image and model unchanged. Both approval pins remain null. V2 has only
+The ownership-only repair left VM/bootstrap/serving artifacts unchanged.
+The subsequent bounded host-progress preparation refreshes the root-host bundle
+for diagnostics; it leaves the serving image, model and isolation policy unchanged. Both approval pins remain null. V2 has only
 local CPU/dummy coverage until separately approved native acceptance succeeds.

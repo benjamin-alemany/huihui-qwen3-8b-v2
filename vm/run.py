@@ -10,6 +10,7 @@ from host_policy import Refused,root_file,manifest_from,atomic,timestamp,docker_
 from attestation import context_digest,protected
 from gateway import config_from,strict_json,protected_group_file,MODEL,REVISION
 from egress_probe import EXPECTED_CHECKS
+from console_diagnostics import emit
 HERE=Path(__file__).resolve().parent
 ENV={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'}
 STATE=Path('/var/lib/unjailed/runtime.json')
@@ -100,8 +101,10 @@ def main():
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   if STATE.exists():raise Refused('Runtime already attempted; no automatic retry')
   state={'version':1,'sessionId':m['sessionId'],'nonce':m['nonce'],'deadlineUTC':m['deadlineUTC'],'phase':'preparing'};atomic(STATE,state)
-  def save(phase):remaining();state['phase']=phase;atomic(STATE,state)
+  def save(phase):
+   remaining();state['phase']=phase;atomic(STATE,state);emit(m,'runtime',phase,'passed' if phase=='ready' else 'running')
   try:
+   emit(m,'runtime','preparing')
    c=config_from(strict_json(protected_group_file('/etc/unjailed/gateway.json').read_bytes()))
    if any(c[key]!=m[key] for key in ['sessionId','nonce','createdAt','deadlineUTC']) or c['servingImage']!=m['image']:raise Refused('Gateway config differs from allocation')
    boot=json.loads(root_file('/var/lib/unjailed/bootstrap.json').read_text())
@@ -109,13 +112,14 @@ def main():
    bundle_verified(c);remaining()
    # Before sealing, only reviewed image/binary downloads. All startup costs
    # still consume the original deadline and the independent external guards.
-   run(['docker','pull',m['image']],seconds=900);install_cloudflared();remaining()
-   run(['/bin/bash',str(HERE/'linux_fixture.sh')],seconds=120)
+   save('image-pull');run(['docker','pull',m['image']],seconds=900)
+   save('connector-install');install_cloudflared();remaining()
+   save('host-boundary-probe');run(['/bin/bash',str(HERE/'linux_fixture.sh')],seconds=120)
    save('sealing');run(['/usr/bin/python3','-I','-B',str(HERE/'seal_boundary.py'),'--execute'])
    directory=Path('/run/unjailed');directory.chown(0,10002);directory.chmod(0o750)
    # gateway.json is root-written at install, gateway-group readable at runtime.
    config_path=Path('/etc/unjailed/gateway.json');config_path.chown(0,10002);config_path.chmod(0o640)
-   args=docker_arguments(m);args[1]='create';run(args)
+   save('container-create');args=docker_arguments(m);args[1]='create';run(args)
    run(['/usr/bin/python3','-I','-B',str(HERE/'native_attest.py'),'--prepare-context'])
    context=json.loads(root_file('/run/unjailed/attestations/'+m['sessionId']+'/context.json').read_text())
    run(['docker','start',name]);save('native-boundary')
@@ -169,7 +173,7 @@ def main():
    write_ready({**validated,'status':'ready','modelLoaded':True})
    save('ready');print('HOST_GATEWAY_READY_MODEL_CHAT_ONLY')
   except BaseException:
-   state['phase']='failed';atomic(STATE,state)
+   state['failurePhase']=state['phase'];state['phase']='failed';atomic(STATE,state);emit(m,'runtime',state['failurePhase'],'failed')
    Path('/run/unjailed/host-ready.json').unlink(missing_ok=True)
    subprocess.run(['docker','stop','--time','3',name],env=ENV,capture_output=True,timeout=10)
    subprocess.run(['systemctl','stop','--no-block','unjailed-gateway.service','unjailed-tunnel.service'],env=ENV,capture_output=True,timeout=10)

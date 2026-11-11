@@ -15,7 +15,9 @@ The prepared ownership protocol explicitly uses `nonce-name-v2`: the full random
 
 Each guard must emit an explicit matching V2 policy receipt, with its current Worker version and immutable reservation/deadline. A current version ID alone cannot substitute for feature support. Both roles must pass before a new create attempt. This is free-tested code preparation; a cloud deployment must preserve the launch locks and does not validate the target VM. The VM code, bootstrap bundle, serving image and model remain unchanged by the ownership repair.
 
-The latest local verification passed 264 Node checks, 25 chat Worker tests, 17 controller Durable Object tests and 20 guard Durable Object tests. The Python suite ran 59 tests with one skip. These are CPU/dummy checks, not native GPU or live browser-to-model acceptance.
+The latest local verification passed 293 Node checks, 25 chat Worker tests, 17 controller Durable Object tests and 20 guard Durable Object tests. The Python suite ran 62 tests with one skip. These are CPU/dummy checks, not native GPU or live browser-to-model acceptance.
+
+The trusted host bundle now emits bounded, keyless progress through fixed console devices. The controller reads only context-bound markers from the bound VM's ACTIVE console-log API, retaining a sanitized startup-failure summary before deletion when there is sufficient time. Owner Stop and expiry take priority, and diagnostics never grant health or permission. Actual console capture remains a native check; a missing marker is unavailable evidence, not a pass. Startup timeouts now survive cleanup as a distinct reason and have a plain-language owner message.
 
 Cloud autosave, revision conflicts, durable idempotent turns, draft-aware backups, fixed session limits and repeat-session controls are implemented. Historical/test and ordinary-use ledgers stay separate. Ordinary allowance remains zero; owner grants never purchase provider credits or renew sessions automatically. Unknown create or cleanup outcomes retain holds and guards.
 
@@ -23,7 +25,7 @@ Cloud autosave, revision conflicts, durable idempotent turns, draft-aware backup
 
 1. Review and prepare the free V2 cloud candidate while preserving paid launch locks. Both actual guards must produce the exact V2 feature/version receipts before any future create.
 2. Present a fresh bounded acceptance plan and quote for explicit approval. The previous single-allocation authorization is consumed; no paid retry is authorized by this checkpoint.
-3. On the separately approved allocation, pass native model-free isolation/cache/CUDA checks, independently verify the provider firewall, then permit Qwen loading and a bounded chat reply. Verify login → quote → Start → chat → autosave/reopen/recovery → export/restore → Stop, followed by fresh destruction and resource/billing evidence.
+3. Follow the [single-allocation Hyperstack runbook](HYPERSTACK-CHAT-ACCEPTANCE.md). Its thirty-minute acceptance includes startup, and a never-ready session is cleaned up at the fifteen-minute startup cutoff (`STARTUP_TIMEOUT`). Pass native model-free isolation/cache/CUDA checks, independently verify the provider firewall, then permit Qwen loading and a bounded chat reply. Verify login → quote → Start → chat → autosave/reopen/recovery → export/restore → Stop, followed by fresh destruction and resource/billing evidence.
 4. Promote only the exact accepted release. Ordinary use still requires an explicit allowance and owner confirmation of each session quote.
 
 No product release, native compatibility result or completion percentage is implied by source preparation or test counts. Do not relax failed protections, automatically retry, shop providers, or repeat unchanged successful GPU tests.

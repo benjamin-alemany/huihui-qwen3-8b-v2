@@ -262,7 +262,7 @@ test('startup includes cold boot and aborts after min(15,duration-2) without ren
  for(const minutes of [15,30,60]){
   const h=await ordinary();h.set({health:false});const s=await h.ready({minutes}),cutoff=Math.min(15,minutes-2);
   h.advance(cutoff*60000-1);await h.engine().tick();assert.equal((await h.engine().status()).session.phase,'starting');
-  h.advance(1);await h.engine().tick();assert.equal((await h.engine().status()).session.cleanupVerified,true);assert.equal((await h.engine().status()).session.deadline,s.deadline);assert.equal(h.creates,1);
+  h.advance(1);await h.engine().tick();assert.equal((await h.engine().status()).session.cleanupVerified,true);assert.equal((await h.engine().status()).session.code,'STARTUP_TIMEOUT');assert.equal((await h.engine().status()).session.deadline,s.deadline);assert.equal(h.creates,1);
  }
 });
 test('ordinary holds survive unknown creates and test-budget mode changes without pooling',async()=>{

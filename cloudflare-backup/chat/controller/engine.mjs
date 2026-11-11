@@ -1,8 +1,20 @@
 import {applyOperatorBudget} from './budget-reconcile.mjs';
+import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
 import {SEED,SCALE,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,ordinaryBudgetView,parseGrant,quoteMinutes,sessionMinutes,startupMinutes,receiptFresh,IMAGE,GPU,DISK_GB} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
 const legacyLifecycle={catalogFrom,makeQuote,reservation,matches:podMatches,validate:validatePod,createBody,receiptFresh,quoteMinutes,cleanupComplete:r=>r===true,priceAccept:(p,s)=>p.cost<=s.quote.gpuHourlyUSD,isRunning:p=>p.status==='RUNNING',isFailed:p=>['EXITED','ERROR'].includes(p.status),context:s=>({CHAT_ENABLED:'true',CHAT_SESSION:JSON.stringify({podId:s.pod.id,createdAt:new Date(s.bootAt).toISOString(),nonce:s.nonce,minutes:sessionMinutes(s)}),INFERENCE_API_KEY:s.inferenceKey})};
 const knownPodIds=s=>[...new Set([...(s.knownPodIds??[]),...(s.pod?[s.pod.id]:[])])];
+function markDiagnosticAttempt(s,eligible,now){
+ const wait=Math.floor(Math.min(30000,s.leaseUntil-now-1000,s.deadline-now-15000));
+ if(!eligible||s.stopRequested||s.everReady||s.diagnosticsAttempted===true||s.deadline-now<45000||!Number.isSafeInteger(wait)||wait<=0)return 0;
+ s.diagnosticsAttempted=true;s.diagnosticsAttemptedAt=now;return wait;
+}
+function captureHostDiagnostics(provider,allocation,reservation,sessionId,now,timeoutMs){
+ const binding={allocation,reservation,sessionId};let timer;
+ const unavailable=()=>{try{return safeDiagnosticReceipt({version:1,provider:'hyperstack',kind:'host-console-progress-v1',state:'unavailable',sessionId,nonce:reservation.nonce,deadline:reservation.deadline,allocationId:allocation.id,observedAt:now(),events:[],diagnosticOnly:true},binding);}catch{return null;}};
+ return Promise.race([Promise.resolve().then(()=>provider.diagnostics(allocation,reservation,sessionId)),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),timeoutMs);})])
+  .then(result=>safeDiagnosticReceipt(result,binding)??unavailable(),()=>unavailable()).finally(()=>clearTimeout(timer));
+}
 function keylessGuardProof(proof,q,verifiedAt){
  const pick=(value,keys)=>Object.fromEntries(keys.filter(k=>['string','number'].includes(typeof value?.[k])).map(k=>[k,value[k]]));
  return {verifiedAt,...pick(q,['provider','ownershipPolicy','name','image','nonce','deadline']),guards:Object.fromEntries(['primary','backup'].map(role=>[role,{role,...pick(proof.guards[role],['worker','version','eventTimestamp','mode','nonce','expiry','ownershipPolicy'])}]))};
@@ -162,7 +174,7 @@ export class SessionEngine {
         debit=Math.ceil((Math.max(0,this.d.now()-current.bootAt)/1000+120)*Math.ceil(current.quote.totalHourlyUSD*SCALE)/3600);
       }
       const ledger=this.funding(r,current);ledger.held-=current.quote.holdUnits;ledger.spent+=debit;
-      current.settledUnits=debit;current.phase=phase;current.code=code;current.finishedAt=this.d.now();current.leaseUntil=0;
+      current.settledUnits=debit;current.phase=phase;current.code=code??current.code??null;current.finishedAt=this.d.now();current.leaseUntil=0;
       delete current.inferenceKey;delete current.modelKey;delete current.nonce;
     });
   }
@@ -225,8 +237,22 @@ export class SessionEngine {
           if(this.d.now()>Date.parse(s.reservation.windowEnd))await update(s.id,c=>{c.phase='attention';c.code='CREATE_OUTCOME_UNKNOWN';c.stopRequested=true;});
           return; // Hold and guards remain armed until a real outcome is known.
         }
-        if(pods.length!==1||pods.some(p=>!this.lifecycle.priceAccept(p,s))||s.stopRequested||this.d.now()>=s.deadline||this.d.now()-s.bootAt>=startupMinutes(s)*60000&&!s.everReady||pods.some(p=>this.lifecycle.isFailed(p))){
-          await update(s.id,c=>{c.phase='stopping';c.stopRequested=true;c.stopAt??=this.d.now();c.pod??=pods[0];});
+        const resourceProblem=pods.length!==1||pods.some(p=>!this.lifecycle.priceAccept(p,s))||pods.some(p=>this.lifecycle.isFailed(p));
+        const deadlineReached=this.d.now()>=s.deadline,startupTimedOut=this.d.now()-s.bootAt>=startupMinutes(s)*60000&&!s.everReady;
+        if(resourceProblem||s.stopRequested||deadlineReached||startupTimedOut){
+          const diagnosticWait=await update(s.id,c=>{
+            // Record the trigger before cleanup, without recasting an owner
+            // Stop or an existing provider/identity diagnosis as a timeout.
+            if(!c.stopRequested&&!resourceProblem){
+              if(deadlineReached)c.code??='SESSION_DEADLINE_REACHED';
+              else if(startupTimedOut&&!c.everReady)c.code??='STARTUP_TIMEOUT';
+            }
+            const wait=markDiagnosticAttempt(c,this.lifecycle.provider==='hyperstack'&&pods.length===1&&typeof this.d.provider.diagnostics==='function'&&(startupTimedOut||resourceProblem)&&!deadlineReached,this.d.now());
+            c.phase='stopping';c.stopRequested=true;c.stopAt??=this.d.now();c.pod??=pods[0];return wait;
+          });
+          // Only early never-ready failures may use this bounded ACTIVE-only
+          // console read. Manual Stop/expiry bypass it; no deadline is renewed.
+          if(diagnosticWait){const result=await captureHostDiagnostics(this.d.provider,pods[0],s.reservation,s.id,this.d.now,diagnosticWait);if(result)await update(s.id,c=>{c.hostDiagnostics=result;});}
           await Promise.allSettled(this.d.guards.map(g=>g.shorten(s.reservation.name,this.d.now())));
           let complete=true;for(const p of pods){const receipt=await this.d.provider.cleanup(p,s.reservation,Infinity);if(!this.lifecycle.cleanupComplete(receipt))complete=false;if(this.d.lifecycle&&!await this.recordCleanup(s,receipt))throw new SessionError('SESSION_LEASE_CHANGED',503);}
           // finish rechecks every known ID and records any newly listed Pods.
@@ -244,7 +270,10 @@ export class SessionEngine {
       if(s&&!s.createAttempted){
         try{await this.finish(s,'failed',error instanceof SessionError?error.code:'PREFLIGHT_FAILED');}catch{await update(s.id,c=>{c.stopRequested=true;c.code='GUARD_DISARM_PENDING';});}
       }else if(s){
-        await update(s.id,c=>{c.stopRequested=true;c.phase='stopping';c.code='PROVIDER_OR_IDENTITY_UNCONFIRMED';});
+        let allocation=s.knownAllocations?.length===1?s.knownAllocations[0]:null;
+        try{if(allocation)this.lifecycle.validate(allocation,s.reservation,Infinity);}catch{allocation=null;}
+        const diagnosticWait=await update(s.id,c=>{const wait=markDiagnosticAttempt(c,this.lifecycle.provider==='hyperstack'&&!!allocation&&typeof this.d.provider.diagnostics==='function',this.d.now());c.stopRequested=true;c.phase='stopping';c.code??='PROVIDER_OR_IDENTITY_UNCONFIRMED';return wait;});
+        if(diagnosticWait){const result=await captureHostDiagnostics(this.d.provider,allocation,s.reservation,s.id,this.d.now,diagnosticWait);if(result)await update(s.id,c=>{c.hostDiagnostics=result;});}
         await Promise.allSettled(this.d.guards.map(g=>g.shorten(s.reservation.name,this.d.now())));
       }
     }finally{

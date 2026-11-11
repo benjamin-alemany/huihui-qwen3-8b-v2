@@ -304,6 +304,33 @@ container. Any startup failure stops this exact container and gateway/tunnel;
 the local absolute timer and both independent cloud destroy guards remain
 responsible for expiry and actual provider resource destruction.
 
-The code and dummy failure tests are prepared. No VM has been provisioned or
-charged, no GPU or model run has been started by this preparation, no agent
-tools are enabled, and no candidate runtime is promoted by these files.
+The first Hyperstack allocation failed its provider ownership readback before
+model permission and was manually deleted with verified cloud reconciliation.
+It established no native CUDA/model result. Current preparation grants no new
+allocation, tool execution or runtime promotion. See `../docs/PROJECT-STATUS.md`.
+
+
+## Bounded host progress diagnostics
+
+`console_diagnostics.py` emits only a fixed stage/status, session UUID, nonce,
+original deadline and timestamp. It writes bounded ASCII records through fixed
+root-owned character console devices with no-follow/nonblocking flags. It does
+not print commands, exceptions, environments, package logs, keys, file contents
+or model responses. Bootstrap and runtime preserve the failed stage locally.
+No guest provider key, SSH access, new listener or model network permission is
+introduced. Diagnostic delivery failure never relaxes an execution gate.
+
+The controller can request the bound ACTIVE VM's console log through
+Hyperstack's [request logs](https://docs.hyperstack.cloud/docs/api-reference/request-vm-logs/)
+and [retrieve logs](https://docs.hyperstack.cloud/docs/api-reference/get-vm-logs/)
+API, with the provider key staying outside the VM. It retains only allowlisted,
+context-bound progress records; raw console text and API errors are not exposed
+to chat, owner status or model inference. Unknown/missing markers are recorded as
+unavailable and never establish native success. Console-device routing and
+marker visibility across the real reboot still require native verification.
+
+A 30-minute session has a 15-minute startup cutoff including installation,
+reboot, image pull, cache checks, CUDA and model loading. Timeout remains a failed
+startup followed by cleanup, not a successful owner Stop or permission to extend
+the timer. Progress is diagnostic only; authenticated native attestation,
+provider firewall verification and the separate model permit remain mandatory.

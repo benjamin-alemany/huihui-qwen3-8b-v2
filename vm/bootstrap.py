@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from host_policy import Refused,root_file,manifest_from,progress,atomic,deadline_units
 from metadata import verify,records
+from console_diagnostics import emit
 HERE=Path(__file__).resolve().parent
 STATE=Path('/var/lib/unjailed/bootstrap.json');SESSION=Path('/etc/unjailed/session.json')
 ENV={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND':'noninteractive','LC_ALL':'C'}
@@ -94,30 +95,40 @@ def kernel_probe(lock,kernel):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--execute',action='store_true');args=parser.parse_args()
     if not args.execute:raise Refused('Preparation only; explicit approved VM execution required')
-    host();m=manifest_from(json.loads(root_file(SESSION).read_text()));lock=json.loads((HERE/'packages.lock.json').read_text())
+    m=manifest_from(json.loads(root_file(SESSION).read_text()));emit(m,'bootstrap','new')
+    try:host()
+    except Exception:
+        emit(m,'bootstrap','new','failed');raise
+    lock=json.loads((HERE/'packages.lock.json').read_text())
     STATE.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
     with (STATE.parent/'bootstrap.lock').open('a') as handle:
         fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
         previous=json.loads(root_file(STATE).read_text()) if STATE.exists() else None
         boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();state=progress(m,previous,time.time(),boot);old_boot=previous.get('bootId') if previous else None
+        diagnostic_phase=state['phase']
+        def report(phase,status='running'):
+            nonlocal diagnostic_phase
+            diagnostic_phase=phase;emit(m,'bootstrap',phase,status)
         def save(phase):
             state.update(progress(m,state,time.time(),boot));state['phase']=phase;atomic(STATE,state)
+            report(phase,'passed' if phase=='host-ready-model-not-started' else 'running')
         try:
+            report(diagnostic_phase)
             # Local timer is armed before metadata, package downloads or reboot.
             for name,text in deadline_units(m).items():Path('/etc/systemd/system',name).write_text(text)
             run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','unjailed-deadline.timer'])
             if state['phase']=='new':
-                atomic(STATE,state);verify(lock);apt_sources(lock);validate_apt_sources();run(['apt-get','-o','APT::Get::AllowUnauthenticated=false','update']);save('installing')
+                atomic(STATE,state);report('metadata-review');verify(lock);apt_sources(lock);validate_apt_sources();run(['apt-get','-o','APT::Get::AllowUnauthenticated=false','update']);save('installing')
                 install(lock,platform.release());save('awaiting-reboot')
                 shutil.copyfile(HERE/'bootstrap.service','/etc/systemd/system/unjailed-bootstrap.service')
                 run(['systemctl','daemon-reload']);run(['systemctl','enable','unjailed-bootstrap.service']);run(['systemctl','reboot']);return
             if state['phase']=='installing':raise Refused('Interrupted installation requires operator review; no automatic reinstall')
             if state['phase']=='awaiting-reboot' and old_boot==boot:raise Refused('Driver reboot not observed')
-            kernel_probe(lock,platform.release());Path('/etc/docker').mkdir(exist_ok=True)
+            report('driver-check');kernel_probe(lock,platform.release());Path('/etc/docker').mkdir(exist_ok=True)
             shutil.copyfile(HERE/'daemon.json','/etc/docker/daemon.json');run(['nvidia-ctk','runtime','configure','--runtime=docker']);run(['systemctl','restart','docker'])
             save('host-ready-model-not-started');print('HOST_READY_MODEL_NOT_STARTED')
         except Exception:
-            state['failurePhase']=state['phase'];state['phase']='failed';atomic(STATE,state)
+            state['failurePhase']=diagnostic_phase;state['phase']='failed';atomic(STATE,state);report(diagnostic_phase,'failed')
             subprocess.run(['systemctl','stop','docker'],env=ENV,capture_output=True,timeout=20)
             raise
 if __name__=='__main__':

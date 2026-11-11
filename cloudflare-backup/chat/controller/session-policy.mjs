@@ -1,4 +1,5 @@
 import release from '../../../release/manifest.json' with {type:'json'};
+import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
 export const IMAGE=release.legacyValidation.image;
 export const GPU=release.legacyValidation.gpu,MINUTES=release.legacyValidation.minutes,DISK_GB=release.legacyValidation.diskGB;
 export const DEFAULT_MINUTES=release.sessions.defaultMinutes,SESSION_MINUTES=Object.freeze([...release.sessions.allowedMinutes]),MAX_GRANT_USD=10;
@@ -48,10 +49,16 @@ export function createBody(s,now){
   return {name:s.reservation.name,image:IMAGE,cloud:'SECURE',gpu:{id:GPU,count:1,minCudaVersion:'13.0',minRamPerGpu:32,minVcpuCountPerGpu:4},disk:DISK_GB,ports:['8000/http'],startSsh:false,startJupyter:false,globalNetworking:false,
     env:{VLLM_API_KEY:s.inferenceKey,CHAT_CLOUD_GUARDS_VERIFIED:'true',CHAT_RESERVED_AT:new Date(now).toISOString(),CHAT_DEADLINE_UTC:new Date(now+sessionMinutes(s)*60000).toISOString()}};
 }
+function diagnosticView(s){
+  const result=safeDiagnosticReceipt(s.hostDiagnostics,{allocation:s.pod??s.knownAllocations?.[0],reservation:s.reservation,sessionId:s.id});
+  if(!result)return s.diagnosticsAttempted===true?{state:'unavailable',eventCount:0,latestEvent:null,diagnosticOnly:true}:null;
+  const event=result.events.at(-1);
+  return {state:result.state,observedAt:result.observedAt,eventCount:result.events.length,latestEvent:event?{component:event.component,phase:event.phase,status:event.status,at:event.at}:null,diagnosticOnly:true};
+}
 export function safeSession(s){
   if(!s)return null;
   return {id:s.id,quoteId:s.quoteId,minutes:sessionMinutes(s),phase:s.phase,code:s.code??null,stopRequested:!!s.stopRequested,createdAt:s.pod?.createdAt??null,deadline:s.deadline?new Date(s.deadline).toISOString():null,
-    maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted,...(s.guardProof?{guardProof:structuredClone(s.guardProof)}:{})};
+    maximumUSD:s.quote.maximumUSD,settledUpperUSD:s.settledUnits===undefined?null:dollars(s.settledUnits),cleanupVerified:s.phase==='stopped',createAttempted:!!s.createAttempted,diagnostics:diagnosticView(s),...(s.guardProof?{guardProof:structuredClone(s.guardProof)}:{})};
 }
 export function budgetView(l,originalAcceptance=ORIGINAL_ACCEPTANCE){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),originalAcceptance:originalAcceptance===null?null:parseOriginalAcceptance(JSON.stringify(originalAcceptance))};}
 export function ordinaryBudgetView(l){return {capUSD:dollars(l.cap),spentUpperUSD:dollars(l.spent),reservedUSD:dollars(l.held),remainingUSD:dollars(Math.max(0,l.cap-l.spent-l.held)),grantCount:l.grantCount};}
