@@ -8,6 +8,8 @@
 !start.py
 !vm/boot.py
 !vm/model_boot.py
+!vm/preflight.py
+!vm/egress_probe.py
 !vm/inference_policy.py
 !vm/image_setup.py
 !vm/attestation.py

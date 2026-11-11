@@ -4,7 +4,7 @@ Requires a root-created immutable session, Docker container and empty handoff.
 No image pull, model import, GPU kernel call, provider API or credential output.
 Unexpected NVIDIA hook mount/socket refuses; this code never learns an allowlist.
 """
-import hashlib,json,os,re,stat,subprocess,sys
+import ctypes,hashlib,json,os,re,stat,subprocess,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from host_policy import Refused,root_file,manifest_from,atomic,timestamp
@@ -14,8 +14,10 @@ from attestation import KINDS,context_from,context_digest,protected
 BASE={'/':'overlay','/proc':'proc','/dev':'tmpfs','/dev/pts':'devpts','/sys':'sysfs','/sys/fs/cgroup':'cgroup2','/dev/mqueue':'mqueue','/dev/shm':'tmpfs','/tmp':'tmpfs','/cache':'tmpfs','/home/inference':'tmpfs'}
 MASKED={'/proc/acpi','/proc/scsi','/sys/firmware','/sys/devices/virtual/powercap','/proc/kcore','/proc/keys','/proc/latency_stats','/proc/timer_list','/proc/timer_stats','/proc/sched_debug','/proc/bus','/proc/fs','/proc/irq','/proc/sys','/proc/sysrq-trigger'}
 BINDS={'/etc/resolv.conf':'/etc/unjailed/empty-resolv.conf','/etc/hosts':'/etc/unjailed/empty-hosts','/etc/hostname':'/etc/unjailed/hostname'}
-NVIDIA_FILE=re.compile(r'^/usr/lib/(?:x86_64-linux-gnu|x86_64-linux-gnu/nvidia/current)/lib(?:cuda|nvidia-[a-z0-9-]+)\.so(?:\.[0-9]+)*$')
+NVIDIA_FILE=re.compile(r'^/usr/lib/(?:x86_64-linux-gnu|x86_64-linux-gnu/nvidia/current)/lib(?:cuda|cudadebugger|nvidia-[a-z0-9-]+)\.so(?:\.[0-9]+)*$')
+NVIDIA_BINARY={'/usr/bin/nvidia-cuda-mps-control','/usr/bin/nvidia-cuda-mps-server'}
 DEVICE=re.compile(r'^/dev/nvidia(?:[0-9]+|ctl|uvm|uvm-tools|caps/nvidia-cap[0-9]+)$')
+GPU_PROC=re.compile(r'^/proc/driver/nvidia/gpus/([0-9a-fA-F]{4,8}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])$')
 
 def unescape(value):
  return re.sub(r'\\(040|011|012|134)',lambda m:chr(int(m[1],8)),value)
@@ -38,25 +40,41 @@ def visible(root,target):
   if p.is_symlink():raise Refused('Unexpected symlink in mount target')
  return p
 
+def reviewed_gpu_file(name,driver_version):
+ return bool(NVIDIA_FILE.fullmatch(name) or name in NVIDIA_BINARY or re.fullmatch(r'/usr/lib/firmware/nvidia/'+re.escape(driver_version)+r'/gsp_[a-z0-9_]+\.bin',name))
+
 def installed_gpu_files():
  # Only installed files from the exact pinned compute package, not filenames
  # observed inside the injected container. dpkg metadata came from hashed .debs.
  result={}
  lock=json.loads((Path(__file__).resolve().parent/'packages.lock.json').read_text())
  for package in lock['packages']:
-  if not package['name'].startswith('libnvidia-'):continue
+  if not package['name'].startswith('libnvidia-') and package['name'] not in ['nvidia-utils-580','nvidia-firmware-580']:continue
   version=run(['dpkg-query','--show','--showformat=${Version}',package['name']])
   if version!=package['version'] or run(['dpkg','--verify',package['name']]):raise Refused('Pinned host compute files changed')
   for name in run(['dpkg-query','--listfiles',package['name']]).splitlines():
    p=Path(name)
-   if NVIDIA_FILE.fullmatch(name) and p.is_file() and not p.is_symlink():
+   canonical=str(p.resolve())
+   if reviewed_gpu_file(canonical,lock['driver_version']) and p.is_file() and not p.is_symlink():
     s=p.stat()
     if s.st_uid!=0 or s.st_mode&0o022:raise Refused('Untrusted host driver library')
-    result[name]=hashlib.sha256(p.read_bytes()).hexdigest()
+    digest=hashlib.sha256(p.read_bytes()).hexdigest();result[canonical]=digest
+    if NVIDIA_FILE.fullmatch(canonical):
+     # NVIDIA mount_files puts resolved source basenames in the container's
+     # reviewed library directory, even if the host uses nvidia/current.
+     for directory in ['/usr/lib/x86_64-linux-gnu','/usr/lib/x86_64-linux-gnu/nvidia/current']:result[directory+'/'+p.name]=digest
  if not result:raise Refused('Pinned host compute file inventory missing')
  return result
 
-def verify_mount_inventory(entries,root,driver_files):
+def same_bind(entry,target_info,source_info,directory=False):
+ # mountinfo.root is relative to the source filesystem (e.g. /run is tmpfs),
+ # not necessarily the full host source path. The host Docker mount declaration
+ # pins that exact path; inode/device prove the actual visible object is it.
+ kind=stat.S_ISDIR if directory else stat.S_ISREG
+ if 'ro' not in entry['options'] or not kind(target_info.st_mode) or not kind(source_info.st_mode) or (target_info.st_dev,target_info.st_ino)!=(source_info.st_dev,source_info.st_ino):raise Refused('Fixed readonly host bind identity mismatch')
+ if directory and (target_info.st_uid!=0 or target_info.st_mode&0o077):raise Refused('Root-only native handoff required')
+
+def verify_mount_inventory(entries,root,driver_files,handoff_source=None):
  seen=set()
  for entry in entries:
   target=entry['target'];seen.add(target);p=visible(root,target);s=p.lstat();read_only='ro' in entry['options']
@@ -67,14 +85,38 @@ def verify_mount_inventory(entries,root,driver_files):
   elif target in MASKED:
    if not read_only:raise Refused('Writable OCI mask forbidden')
   elif target in BINDS:
-   if not read_only or not stat.S_ISREG(s.st_mode) or entry['root']!=BINDS[target]:raise Refused('Fixed host file bind mismatch')
+   same_bind(entry,s,Path(BINDS[target]).lstat())
   elif target=='/run/unjailed/attestation':
-   if not read_only or not stat.S_ISDIR(s.st_mode) or not entry['root'].startswith('/run/unjailed/attestations/'):raise Refused('Native handoff mount mismatch')
+   if handoff_source is None:raise Refused('Pinned native handoff source required')
+   same_bind(entry,s,protected(handoff_source,True).lstat(),True)
   elif target in driver_files:
    if not read_only or not stat.S_ISREG(s.st_mode) or hashlib.sha256(p.read_bytes()).hexdigest()!=driver_files[target]:raise Refused('Injected GPU file differs from pinned host package')
   elif DEVICE.fullmatch(target):
    host=Path(target);h=host.lstat()
    if not stat.S_ISCHR(s.st_mode) or not stat.S_ISCHR(h.st_mode) or s.st_rdev!=h.st_rdev:raise Refused('Unexpected NVIDIA device injection')
+  elif target=='/proc/driver/nvidia':
+   if entry['type']!='tmpfs' or entry['root']!='/' or not {'ro','nosuid','nodev','noexec'}.issubset(entry['options']):raise Refused('NVIDIA metadata snapshot not sealed read-only')
+   for child in p.iterdir():
+    if child.name=='gpus' and child.is_dir() and not child.is_symlink():
+     for gpu in child.iterdir():
+      gpu_target='/proc/driver/nvidia/gpus/'+gpu.name
+      if gpu.is_symlink() or not gpu.is_dir() or not GPU_PROC.fullmatch(gpu_target) or gpu_target not in {e['target'] for e in entries}:raise Refused('Unreviewed NVIDIA proc child')
+      for metadata in gpu.iterdir():
+       if metadata.name not in {'information','registry','power'} or metadata.is_symlink() or not metadata.is_file() or len(metadata.read_bytes())>65536:raise Refused('NVIDIA proc child contains an IPC or unreviewed entry')
+     continue
+    if child.name not in {'params','version','registry'} or child.is_symlink() or not child.is_file() or child.stat().st_size>65536:raise Refused('Unexpected NVIDIA metadata snapshot')
+    original=Path('/proc/driver/nvidia')/child.name
+    expected=original.read_bytes()
+    if child.name=='params':expected=expected.replace(b'ModifyDeviceFiles: 1',b'ModifyDeviceFiles: 0')
+    if child.read_bytes()!=expected:raise Refused('NVIDIA metadata differs from bounded host driver metadata')
+  elif GPU_PROC.fullmatch(target):
+   if entry['type']!='proc' or entry['root']!=target.removeprefix('/proc') or not {'ro','nosuid','nodev','noexec'}.issubset(entry['options']):raise Refused('Unexpected host proc exposure')
+   host=Path(target)
+   if p.stat().st_dev!=host.stat().st_dev or p.stat().st_ino!=host.stat().st_ino:raise Refused('GPU proc subtree identity mismatch')
+   gpu_dirs=list(Path('/proc/driver/nvidia/gpus').iterdir())
+   if len(gpu_dirs)!=1 or host.resolve()!=gpu_dirs[0].resolve():raise Refused('GPU proc metadata is not the sole dedicated VM GPU')
+   for child in p.iterdir():
+    if child.name not in {'information','registry','power'} or child.is_symlink() or not child.is_file() or len(child.read_bytes())>65536:raise Refused('Unexpected GPU proc metadata entry')
   else:raise Refused('Unexpected runtime-injected mount; review required')
  if not set(BASE).issubset(seen) or not set(BINDS).issubset(seen) or '/run/unjailed/attestation' not in seen:raise Refused('Required private mount missing')
 
@@ -102,7 +144,7 @@ def verify_sockets(root):
 
 def main():
  import time
- if sys.argv[1:] not in [['--execute'],['--prepare-context']] or os.geteuid()!=0 or sys.platform!='linux':raise Refused('Explicit reviewed native root execution required')
+ if sys.argv[1:] not in [['--execute'],['--prepare-context'],['--seal-driver-metadata']] or os.geteuid()!=0 or sys.platform!='linux':raise Refused('Explicit reviewed native root execution required')
  m=manifest_from(json.loads(root_file('/etc/unjailed/session.json').read_text()))
  if not timestamp(m['createdAt'])<=time.time()<timestamp(m['deadlineUTC']):raise Refused('Native gate expired')
  name='uj-model-'+m['sessionId'];state=inspect(name,'.State');config=inspect(name,'.HostConfig');cid=inspect(name,'.Id')
@@ -139,7 +181,28 @@ def main():
   root_fd=os.open('root',os.O_RDONLY|os.O_DIRECTORY,dir_fd=proc)
   try:
    root='/proc/self/fd/'+str(root_fd)
-   verify_mount_inventory(mounts_from(read('mountinfo')),root,installed_gpu_files());verify_sockets(root)
+   if sys.argv[1:]==['--seal-driver-metadata']:
+    inventory=mounts_from(read('mountinfo'));metadata=[entry for entry in inventory if entry['target']=='/proc/driver/nvidia']
+    if len(metadata)>1 or metadata and (metadata[0]['type']!='tmpfs' or metadata[0]['root']!='/'):raise Refused('Unreviewed NVIDIA metadata mount cannot be sealed')
+    if metadata:
+     namespace=os.open('ns/mnt',os.O_RDONLY,dir_fd=proc)
+     try:
+      child=os.fork()
+      if child==0:
+       try:
+        libc=ctypes.CDLL(None,use_errno=True)
+        if libc.setns(namespace,0):os._exit(1)
+        os.fchdir(root_fd);os.chroot('.');os.chdir('/')
+        # Match NVIDIA's scoped bind-remount and add readonly. No image binary
+        # or model code runs with trusted host privileges.
+        libc.mount.argtypes=[ctypes.c_void_p,ctypes.c_char_p,ctypes.c_void_p,ctypes.c_ulong,ctypes.c_void_p]
+        if libc.mount(None,b'/proc/driver/nvidia',None,4096|32|1|2|4|8,None):os._exit(1)
+        os._exit(0)
+       except BaseException:os._exit(1)
+      if os.waitpid(child,0)[1]!=0:raise Refused('NVIDIA metadata readonly seal refused')
+     finally:os.close(namespace)
+    print('SCOPED_NVIDIA_METADATA_READONLY_SEAL_COMPLETED_NOT_NATIVE_ACCEPTANCE');return
+   verify_mount_inventory(mounts_from(read('mountinfo')),root,installed_gpu_files(),directory);verify_sockets(root)
    for forbidden in ['/run/nvidia-persistenced','/tmp/nvidia-mps','/run/docker.sock','/run/containerd/containerd.sock']:
     if (Path(root)/forbidden.lstrip('/')).exists():raise Refused('Host IPC/control surface visible')
   finally:os.close(root_fd)

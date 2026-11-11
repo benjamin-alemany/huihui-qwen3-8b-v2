@@ -1,11 +1,13 @@
 [Unit]
 Description=Host-side private inference tunnel
-Requires=unjailed-boundary.service
-After=unjailed-boundary.service
+Requires=unjailed-gateway.service
+After=unjailed-gateway.service
 [Service]
 User=10002
 Group=10002
-ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 --config /etc/unjailed/tunnel.yml run
+LoadCredential=tunnel.json:/etc/unjailed/tunnel.json
+LoadCredential=tunnel.yml:/etc/unjailed/tunnel.yml
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 --config /run/credentials/unjailed-tunnel.service/tunnel.yml run
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

@@ -56,6 +56,7 @@ def nftables():
   ct state invalid drop
   ct state established,related accept
   iifname "lo" accept
+  iifname "uj-m-host" counter drop
  }
  chain output { type filter hook output priority -200; policy drop;
   ct state invalid drop

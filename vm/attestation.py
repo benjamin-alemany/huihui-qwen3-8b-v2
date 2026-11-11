@@ -44,3 +44,20 @@ def wait_for_receipt(created,deadline,directory='/run/unjailed/attestation'):
    return verify_receipt(c,r,n,created,deadline)
   time.sleep(.05)
  raise Refused('Native attestation absent at immutable expiry; no model child')
+
+def verify_model_permit(c,permit,created,deadline):
+ context_from(c)
+ expected={'version':1,'sessionId':c['sessionId'],'nonce':c['nonce'],'deadlineUTC':c['deadlineUTC'],'contextSHA256':context_digest(c)}
+ if c['createdAt']!=created or c['deadlineUTC']!=deadline or permit!=expected:raise Refused('Model permit does not bind this immutable allocation')
+ return True
+
+def wait_for_model_permit(created,deadline,directory='/run/unjailed/attestation'):
+ base=protected(directory,True)
+ if not os.statvfs(base).f_flag&os.ST_RDONLY:raise Refused('Model permit handoff must be read-only')
+ wall,mono=time.time(),time.monotonic();expiry=timestamp(deadline)
+ while max(time.time(),wall+time.monotonic()-mono)<expiry:
+  if (base/'model-permit.json').exists():
+   c=json.loads(protected(base/'context.json').read_text());permit=json.loads(protected(base/'model-permit.json').read_text())
+   return verify_model_permit(c,permit,created,deadline)
+  time.sleep(.05)
+ raise Refused('External firewall permit absent at immutable expiry; no model child')

@@ -5,7 +5,7 @@ from host_policy import manifest_from,progress,docker_arguments,nftables,deadlin
 from metadata import verify_index,Refused as MetadataRefused
 from attach_model_network import owned
 from attestation import context_digest,verify_receipt
-from native_attest import mounts_from,verify_sockets
+from native_attest import mounts_from,verify_sockets,same_bind,reviewed_gpu_file
 HERE=Path(__file__).resolve().parent
 class PreparedVMTests(unittest.TestCase):
  def fixture(self):return {'version':1,'sessionId':'11111111-1111-4111-8111-111111111111','nonce':'c'*32,'createdAt':'2026-11-11T12:00:00Z','deadlineUTC':'2026-11-11T12:30:00Z','image':'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'1'*64,'resources':{'vmId':123,'publicIpAddress':'203.0.113.1','volumeIds':[]}}
@@ -57,6 +57,17 @@ class PreparedVMTests(unittest.TestCase):
   with self.assertRaises(Refused):verify_receipt(c,r,n,c['createdAt'],'2026-11-11T12:45:00Z')
  def test_native_mount_parser(self):
   records=mounts_from('10 9 0:1 /run/nvidia-persistenced /run/nvidia-persistenced ro - tmpfs tmpfs rw\n');self.assertEqual(records[0]['root'],'/run/nvidia-persistenced')
+ def test_native_bind_uses_inode_identity_when_run_is_a_separate_tmpfs(self):
+  import stat
+  from types import SimpleNamespace
+  entry={'root':'/unjailed/attestations/DUMMY','options':{'ro'}}
+  source=SimpleNamespace(st_mode=stat.S_IFDIR|0o700,st_uid=0,st_dev=4,st_ino=100)
+  same_bind(entry,source,source,True)
+  with self.assertRaises(Refused):same_bind(entry,source,SimpleNamespace(st_mode=source.st_mode,st_uid=0,st_dev=4,st_ino=101),True)
+  with self.assertRaises(Refused):same_bind({**entry,'options':{'rw'}},source,source,True)
+ def test_compute_file_mount_candidates_are_regular_signed_package_files_only(self):
+  for path in ['/usr/lib/x86_64-linux-gnu/libcudadebugger.so.580.196.07','/usr/bin/nvidia-cuda-mps-control','/usr/lib/firmware/nvidia/580.196.07/gsp_ga10x.bin']:self.assertTrue(reviewed_gpu_file(path,'580.196.07'))
+  for path in ['/run/nvidia-persistenced/socket','/tmp/nvidia-mps/control','/usr/bin/nvidia-smi','/etc/shadow','/usr/lib/firmware/nvidia/999.1/gsp_ga10x.bin']:self.assertFalse(reviewed_gpu_file(path,'580.196.07'))
  @unittest.skipUnless(sys.platform=='linux','Actual pathname socket fixture requires the free Linux CPU runner')
  def test_actual_socket_inventory_fails_closed(self):
   import socket

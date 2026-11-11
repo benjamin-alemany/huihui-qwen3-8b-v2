@@ -7,6 +7,7 @@
 !start.py
 !vm/boot.py
 !vm/cpu_child.py
+!vm/cpu_preflight.py
 !vm/inference_policy.py
 !vm/image_setup.py
 !vm/dummy_cache.py

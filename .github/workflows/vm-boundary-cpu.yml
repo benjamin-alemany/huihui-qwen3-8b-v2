@@ -39,6 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           env -i PATH=/usr/bin:/bin python3 -I -B vm/test_vm.py
+          env -i PATH=/usr/bin:/bin python3 -I -B vm/test_gateway.py
           bash -n vm/linux_fixture.sh
           sh -n vm/attach_model_network.sh
       - name: Require reviewed distribution tools for dummy namespaces
