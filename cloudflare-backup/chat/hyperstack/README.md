@@ -1,5 +1,20 @@
 # Hyperstack adapter candidate
 
+## Exceptional operator cleanup
+
+`OPERATOR_ABSENCE_RECONCILIATION_JSON` is a temporary private deployment
+directive for a known-created, manually deleted acceptance VM whose provider
+readback omitted its reservation label. It never changes normal ownership
+matching, creates a tag, authorizes DELETE, or asserts that creation never ran.
+Start and new guard arming must stay locked. The controller alarm and both
+private guard RPCs independently require direct absence, complete empty account
+inventory, then direct absence again. Missing evidence retains keys and holds.
+After all proofs, guards archive keyless receipts and the controller consumes
+the existing hold once as a conservative upper estimate, preserving previous
+spending, approvals and the separate original ledger. Billing remains pending;
+this is neither a refund nor an invoice. Remove the directive after verifying
+its archive. It blocks all new Start and inference while present.
+
 The candidate controller, guard, bootstrap and runtime-handshake paths are wired
 in source and covered by CPU/dummy tests. Those tests do not establish native VM,
 CUDA, model or provider-firewall compatibility. Paid Start remains locked by the

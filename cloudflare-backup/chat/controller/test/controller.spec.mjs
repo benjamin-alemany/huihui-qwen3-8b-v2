@@ -1,8 +1,12 @@
 import {it,expect,vi} from 'vitest';
 import {env,exports} from 'cloudflare:workers';
 import {runInDurableObject,evictDurableObject,runDurableObjectAlarm} from 'cloudflare:test';
-import {IMAGE,GPU,reservation} from '../session-policy.mjs';
-import {TARGET as HYPER_TARGET} from '../../hyperstack/fixtures.mjs';
+import {IMAGE,GPU,reservation,SCALE,SEED} from '../session-policy.mjs';
+import {TARGET as HYPER_TARGET,rawVM} from '../../hyperstack/fixtures.mjs';
+import manifest from '../../../../release/manifest.json' with {type:'json'};
+import {hyperstackLifecycle} from '../../hyperstack/controller-policy.mjs';
+import {normalizeVM,validateReservation} from '../../hyperstack/policy.mjs';
+import {verifyOperatorAbsence} from '../../hyperstack/operator-absence.mjs';
 it('has no public admin/start/inference endpoint',async()=>{
   for(const path of ['/','/api/start','/api/status','/api/exec','/api/check'])expect((await exports.default.fetch(new Request('https://dummy.test'+path))).status).toBe(404);
 });
@@ -103,7 +107,7 @@ async function selectedController(patch){
 it('malformed Hyperstack configuration reports honest blockers without Runpod fallback or HTTP',async()=>{
  const stub=await selectedController({HYPERSTACK_TARGET_JSON:'{}',HYPERSTACK_API_KEY:'DUMMY_HYPERSTACK_KEY'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
  try{
-  const status=await stub.status();expect(status.hostingProvider).toBe('hyperstack');expect(status.launchEnabled).toBe(false);expect(status.networkBoundaryReady).toBe(false);expect(status.launchBlockers).toContain('HYPERSTACK_TARGET_UNVERIFIED');expect(status.launchBlockers).toContain('HYPERSTACK_RUNTIME_ORCHESTRATOR_UNAVAILABLE');expect(status.launchBlockers).toContain('HYPERSTACK_ORIGINAL_ACCEPTANCE_UNCONFIGURED');expect(status.testBudget.originalAcceptance).toBeNull();expect(status.operatorBudgetReconciliation.ready).toBe(false);expect(JSON.stringify(status)).not.toContain('DUMMY_');
+  const status=await stub.status();expect(status.hostingProvider).toBe('hyperstack');expect(status.launchEnabled).toBe(false);expect(status.networkBoundaryReady).toBe(false);expect(status.launchBlockers).toContain('HYPERSTACK_TARGET_UNVERIFIED');expect(status.providerReadiness.targetConfigured).toBe(false);expect(status.launchBlockers).toContain('HYPERSTACK_ORIGINAL_ACCEPTANCE_UNCONFIGURED');expect(status.testBudget.originalAcceptance).toBeNull();expect(status.operatorBudgetReconciliation.ready).toBe(false);expect(JSON.stringify(status)).not.toContain('DUMMY_');
   expect((await stub.quote()).error).toBe('HYPERSTACK_TARGET_UNVERIFIED');expect((await stub.start({quoteId:'anything',maximumUSD:.3})).error).toBe('HYPERSTACK_TARGET_UNVERIFIED');expect(await runInDurableObject(stub,i=>i.context())).toBeNull();expect(spy).not.toHaveBeenCalled();
  }finally{spy.mockRestore();}
 });
@@ -118,4 +122,41 @@ it('Hyperstack source release locks preserve grants and ledgers; Stop still revo
 it('unknown hosting-provider spelling cannot select the configured legacy provider',async()=>{
  const stub=await selectedController({HOSTING_PROVIDER:'hyperstak'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
  try{const status=await stub.status();expect(status.hostingProvider).toBe('invalid');expect(status.launchBlockers[0]).toBe('HOSTING_PROVIDER_INVALID');expect(status.launchEnabled).toBe(false);expect((await stub.start({quoteId:'anything',maximumUSD:.3})).error).toBe('HOSTING_PROVIDER_INVALID');expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
+});
+it('a trusted recovery directive always blocks Start and context even when launch flags are enabled',async()=>{
+ const a=await selectedController({START_ENABLED:'true',OPERATOR_ABSENCE_RECONCILIATION_JSON:'invalid-private-directive'});
+ const spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{expect((await a.start({quoteId:'anything',maximumUSD:.35})).error).toBe('OPERATOR_RECOVERY_ACTIVE');expect(await runInDurableObject(a,i=>i.context())).toBeNull();expect(await runInDurableObject(a,i=>i.engine().d.enabled)).toBe(false);expect((await a.status()).launchEnabled).toBe(false);expect((await exports.default.fetch(new Request('https://dummy.test/api/operator-absence'))).status).toBe(404);expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
+});
+
+async function recoveryControllerFixture(){
+ const name=crypto.randomUUID(),stub=env.SESSION_CONTROLLER.getByName(name),target={...HYPER_TARGET,imageId:manifest.hosting.vmImageId},lifecycle=hyperstackLifecycle({target,release:manifest}),start=Date.now()-10*60000;
+ const q=validateReservation(lifecycle.reservation(start,'a'.repeat(32),30)),quote=lifecycle.makeQuote({provider:'hyperstack',gpu:'RTX-A6000',gpuHourly:.5,totalHourly:.50672043,availability:'AVAILABLE'},start,crypto.randomUUID(),30);
+ const packet={version:1,id:crypto.randomUUID(),sessionId:crypto.randomUUID(),approvalId:'DUMMY_ONE_ACCEPTANCE',reservation:q,allocation:normalizeVM(rawVM({name:q.name,created_at:new Date(start+1000).toISOString(),labels:[]})),observedAt:start+2000,deleteRequestedAt:start+3000,absenceObservedAt:start+4000,reason:'MISSING_PROVIDER_LABEL'};
+ const policy={id:'operator-budget-0123456789abcdef',capUnits:2*SCALE,spentFloorUnits:Math.round(.4*SCALE)},ledger={...structuredClone(SEED),cap:policy.capUnits,spent:policy.spentFloorUnits,held:quote.holdUnits,usedApprovals:['DUMMY_EARLIER_APPROVAL',packet.approvalId],operatorBudgetReconciliations:[policy]},ordinaryLedger={version:1,cap:0,spent:0,held:0,grantCount:0};
+ const record={ledger,ordinaryLedger,quotes:[],session:{id:packet.sessionId,quoteId:quote.id,quote,reservation:q,approval:packet.approvalId,budgetKind:'test',createAttempted:true,phase:'attention',stopRequested:true,everReady:false,nonce:q.nonce,bootAt:q.createdNotBefore,deadline:q.deadline,inferenceKey:'c'.repeat(64),modelKey:'d'.repeat(64),leaseUntil:0}};
+ const guardCalls=[];let guardFailure=false;
+ const guard=role=>({operatorAbsence:async p=>{guardCalls.push([role,'rpc']);expect(p).toEqual(packet);if(guardFailure&&role==='backup')throw Error('DUMMY_GUARD_UNCONFIRMED');const provider={get:async id=>{guardCalls.push([role,'get',id]);return null;},list:async()=>{guardCalls.push([role,'list']);return [];}};return {...await verifyOperatorAbsence({provider,packet:p,target,now:Date.now}),role,armed:false,bindings:[],deleted:[]};}});
+ const patch={HOSTING_PROVIDER:'hyperstack',START_ENABLED:'false',VALIDATION_MODE:'true',APPROVED_ACCEPTANCE_ID:packet.approvalId,HYPERSTACK_TARGET_JSON:JSON.stringify(target),HYPERSTACK_API_KEY:'DUMMY_HYPERSTACK_RECOVERY_KEY',MAX_ACCEPTANCE_USD:'.35',MAX_SESSION_HOURLY_USD:'.507',CLOUDFLARE_ACCOUNT_ID:'1'.repeat(32),CF_TAIL_TOKEN:'D'.repeat(40),ORIGINAL_ACCEPTANCE_JSON:JSON.stringify({capUSD:.51,spentUSD:.4,remainingUSD:.11}),OPERATOR_BUDGET_RECONCILIATION:JSON.stringify(policy),OPERATOR_ABSENCE_RECONCILIATION_JSON:JSON.stringify(packet),PRIMARY_GUARD:guard('primary'),BACKUP_GUARD:guard('backup')};
+ const configure=async object=>runInDurableObject(object,i=>{i.env={...i.env,...patch};});await configure(stub);
+ await runInDurableObject(stub,async(_,ctx)=>{await ctx.storage.put('session-ledger-v1',record);await ctx.storage.put('session-start-v1:'+quote.id,{sessionId:packet.sessionId,budgetKind:'test'});await ctx.storage.setAlarm(Date.now()+60000);});
+ const fetchCalls=[],fetchImpl=async(url,opt={})=>{const u=new URL(url);fetchCalls.push({path:u.pathname,method:opt.method??'GET'});expect(u.origin).toBe('https://infrahub-api.nexgencloud.com');expect(opt.method??'GET').toBe('GET');if(u.pathname==='/v1/core/virtual-machines/44')return Response.json({status:false,error_reason:'not_found'},{status:404});expect(u.pathname).toBe('/v1/core/virtual-machines');return Response.json({status:true,page:1,page_size:100,count:0,instances:[]});};
+ return {name,stub,packet,record,quote,configure,fetchCalls,fetchImpl,guardCalls,setGuardFailure:value=>{guardFailure=value;}};
+}
+it('durable recovery alarm survives eviction, conservatively settles once, erases session keys and preserves evidence',async()=>{
+ const h=await recoveryControllerFixture(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(h.fetchImpl);
+ try{
+  const beforeAlarm=await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.getAlarm());expect(beforeAlarm).not.toBeNull();await evictDurableObject(h.stub);const restored=env.SESSION_CONTROLLER.getByName(h.name);await h.configure(restored);expect(await runInDurableObject(restored,(_,ctx)=>ctx.storage.getAlarm())).toBe(beforeAlarm);
+  await runDurableObjectAlarm(restored);const after=await runInDurableObject(restored,(_,ctx)=>ctx.storage.get('session-ledger-v1'));
+  expect(after.ledger.cap).toBe(h.record.ledger.cap);expect(after.ledger.spent).toBe(h.record.ledger.spent+h.quote.holdUnits);expect(after.ledger.held).toBe(0);expect(after.ledger.usedApprovals).toEqual(h.record.ledger.usedApprovals);expect(after.ordinaryLedger).toEqual(h.record.ordinaryLedger);expect(after.session).toMatchObject({phase:'stopped',createAttempted:true,acceptancePassed:false,settledUnits:h.quote.holdUnits,code:'ACCEPTANCE_IDENTITY_FAILURE_MANUAL_CLEANUP'});expect(after.session.definiteNoCreate).not.toBe(true);for(const key of ['inferenceKey','modelKey','nonce'])expect(after.session[key]).toBeUndefined();expect(after.session.knownAllocations).toBeUndefined();
+  const archive=await runInDurableObject(restored,(_,ctx)=>ctx.storage.get('hyperstack-controller-operator-absence-v1:'+h.packet.id));expect(archive.packet.allocation.labels).toEqual([]);expect(archive.receipt.billingSettlementPending).toBe(true);expect((await restored.status()).operatorRecovery.phase).toBe('verified');expect(await runInDurableObject(restored,(_,ctx)=>ctx.storage.getAlarm())).toBeNull();expect(h.fetchCalls.length).toBe(6);for(const role of ['primary','backup'])expect(h.guardCalls.filter(c=>c[0]===role).map(c=>c[1])).toEqual(['rpc','get','list','get']);
+  const reads=h.fetchCalls.length;await runInDurableObject(restored,(_,ctx)=>ctx.storage.setAlarm(Date.now()+60000));await runDurableObjectAlarm(restored);expect((await runInDurableObject(restored,(_,ctx)=>ctx.storage.get('session-ledger-v1'))).ledger).toEqual(after.ledger);expect(h.fetchCalls.length).toBe(reads);expect((await restored.start({quoteId:h.quote.id,maximumUSD:h.quote.maximumUSD})).error).toBe('OPERATOR_RECOVERY_ACTIVE');expect(await runInDurableObject(restored,i=>i.context())).toBeNull();
+ }finally{spy.mockRestore();}
+});
+it('partial guard recovery failure leaves durable hold, approval and session keys for a later free retry',async()=>{
+ const h=await recoveryControllerFixture();h.setGuardFailure(true);const spy=vi.spyOn(globalThis,'fetch').mockImplementation(h.fetchImpl);
+ try{
+  await runDurableObjectAlarm(h.stub);const blocked=await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.get('session-ledger-v1'));expect(blocked.ledger).toEqual(h.record.ledger);expect(blocked.ordinaryLedger).toEqual(h.record.ordinaryLedger);expect(blocked.session.phase).toBe('attention');expect(blocked.session.inferenceKey).toBe(h.record.session.inferenceKey);expect(blocked.session.modelKey).toBe(h.record.session.modelKey);expect(await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.get('hyperstack-controller-operator-absence-v1:'+h.packet.id))).toBeUndefined();expect((await h.stub.status()).operatorRecovery.phase).toBe('refused');expect(await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.getAlarm())).not.toBeNull();
+  h.setGuardFailure(false);await runDurableObjectAlarm(h.stub);const recovered=await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.get('session-ledger-v1'));expect(recovered.ledger.spent).toBe(h.record.ledger.spent+h.quote.holdUnits);expect(recovered.ledger.held).toBe(0);expect(recovered.session.modelKey).toBeUndefined();expect((await h.stub.status()).operatorRecovery.phase).toBe('verified');
+ }finally{await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.deleteAlarm());spy.mockRestore();}
 });

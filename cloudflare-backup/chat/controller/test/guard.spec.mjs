@@ -3,6 +3,7 @@ import {runInDurableObject} from 'cloudflare:test';
 import {IMAGE,GPU,reservation} from '../session-policy.mjs';import {providerFixture} from './provider-fixture.mjs';
 import guardWorker from '../guard.mjs';
 import {TARGET as HYPER_TARGET,fixture as hyperFixture,rawVM} from '../../hyperstack/fixtures.mjs';
+import {normalizeVM} from '../../hyperstack/policy.mjs';
 it('unarmed guards are keyless and make no provider request; public access is absent',async()=>{
  const stub=env.STOP_RESERVATION.getByName(crypto.randomUUID());const spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
  try{expect((await stub.tick()).status).toBe('unarmed');expect((await stub.report()).armed).toBe(false);expect(spy).not.toHaveBeenCalled();expect((await exports.default.fetch(new Request('https://dummy.test/'))).status).toBe(404);}finally{spy.mockRestore();}
@@ -193,4 +194,15 @@ it('Hyperstack scheduled proof is emitted only for the exact waiting reservation
   await stub.shorten(q.name,Date.now());await guardWorker.scheduled(null,workerEnv);expect(JSON.parse(logs.mock.calls.at(-1)[0]).status).not.toBe('waiting-for-reserved-vm');
   await stub.disarm(q.name);expect((await stub.report()).armed).toBe(false);
  }finally{spy.mockRestore();logs.mockRestore();}
+});
+it('operator-absence private RPC requires locked source policy and archives only fresh independent proof',async()=>{
+ const start=Date.now()-6*60000,q={...hyperReservation(),createdNotBefore:start,createdNotAfter:start+300000,deadline:start+1800000,windowStart:new Date(start).toISOString(),windowEnd:new Date(start+300000).toISOString()},stub=await hyperStub(),f=hyperFixture();
+ const packet={version:1,id:crypto.randomUUID(),sessionId:crypto.randomUUID(),approvalId:'DUMMY_ONE_ACCEPTANCE',reservation:q,allocation:normalizeVM(rawVM({name:q.name,created_at:new Date(start+1000).toISOString(),labels:[]})),observedAt:start+2000,deleteRequestedAt:start+3000,absenceObservedAt:start+4000,reason:'MISSING_PROVIDER_LABEL'};
+ const spy=vi.spyOn(globalThis,'fetch').mockImplementation(f.fetch);
+ try{
+  expect(await rejected(stub,i=>i.operatorAbsence(packet))).toBe(true);expect(f.calls.length).toBe(0);await stub.arm({reservation:q,key:hyperKey});
+  await runInDurableObject(stub,async(i,ctx)=>{await ctx.storage.deleteAlarm();i.env={...i.env,GUARD_ARM_ENABLED:'false'};});expect(await rejected(stub,i=>i.operatorAbsence(packet))).toBe(true);expect(f.calls.length).toBe(0);
+  await runInDurableObject(stub,i=>{i.env={...i.env,OPERATOR_ABSENCE_RECONCILIATION_JSON:JSON.stringify(packet)};});const receipt=await stub.operatorAbsence(packet);expect(receipt.operatorReconciled).toBe(true);expect(receipt.unarmed).toBe(true);expect(receipt.allocationId).toBe('44');expect(receipt.deleted).toEqual([]);expect(JSON.stringify(receipt)).not.toContain(hyperKey);expect(f.calls.length).toBe(3);expect(f.calls.every(c=>c.method==='GET')).toBe(true);
+  await runInDurableObject(stub,async(_,ctx)=>{expect(await ctx.storage.get('hyperstack-guard-key-v1')).toBeUndefined();expect(await ctx.storage.getAlarm()).toBeNull();});expect(await stub.operatorAbsence(packet)).toEqual(receipt);expect(f.calls.length).toBe(3);
+ }finally{spy.mockRestore();}
 });

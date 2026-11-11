@@ -1,12 +1,14 @@
 import {armDestroyGuard,requestDestroy,runDestroyGuard} from './destroy-guard.mjs';
 import {validateReservation,validateTarget,absenceReceipt,fail} from './policy.mjs';
+import {validateOperatorAbsence,parseOperatorAbsence,sameOperatorAbsence,verifyOperatorAbsence} from './operator-absence.mjs';
 const CORE='hyperstack-destroy-reservation',META='hyperstack-guard-runtime-v1',SECRET='hyperstack-guard-key-v1',ARCHIVE='hyperstack-guard-last-archive-v1';
 const LEASE_MS=45_000;
+const OPERATOR_ARCHIVE='hyperstack-operator-absence-v1:';
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const narrow=p=>{if(!p||typeof p.list!=='function'||typeof p.get!=='function'||typeof p.remove!=='function'||'create'in p||'catalog'in p)fail('HYPERSTACK_GUARD_CAPABILITY_INVALID');return p;};
 // Construct only from the trusted Worker environment. No public HTTP handler or
 // caller-selected API destination, target, bootstrap, or provider client exists.
-export function hyperstackGuardRuntime(storage,{target,role,providerFactory,now=Date.now}={}){
+export function hyperstackGuardRuntime(storage,{target,role,providerFactory,now=Date.now,operatorAbsenceJSON,operatorLocked=false}={}){
  const trustedTarget=validateTarget(target);
  if(!['primary','backup'].includes(role)||typeof providerFactory!=='function')fail('HYPERSTACK_GUARD_RUNTIME_INVALID');
  for(const method of ['get','put','delete','transaction','setAlarm','deleteAlarm'])if(typeof storage?.[method]!=='function')fail('HYPERSTACK_GUARD_STORAGE_REQUIRED');
@@ -105,5 +107,25 @@ export function hyperstackGuardRuntime(storage,{target,role,providerFactory,now=
    return {unarmed:true,...archive};
   }finally{await release(m.token);}
  }
- return Object.freeze({arm,shorten,report,disarm,tick});
+ async function operatorAbsence(input){
+  if(operatorLocked!==true)fail('OPERATOR_ABSENCE_LOCK_REQUIRED');
+  const packet=validateOperatorAbsence(input,{target:trustedTarget,now:clock()}),policy=parseOperatorAbsence(operatorAbsenceJSON,{target:trustedTarget,now:clock()});
+  if(!sameOperatorAbsence(packet,policy))fail('OPERATOR_ABSENCE_AUTHORITY_MISMATCH');
+  const archived=await storage.get(OPERATOR_ARCHIVE+packet.id);
+  if(archived){if(!sameOperatorAbsence(archived.packet,packet))fail('OPERATOR_ABSENCE_ID_REUSED');return {...archived.receipt};}
+  const m=await operation(packet.reservation.name);if(!m)fail('OPERATOR_ABSENCE_RESERVATION_MISSING');if(m.busy)fail('HYPERSTACK_GUARD_BUSY');
+  try{
+   const core=await coreFor(m);
+   if(!same(m.reservation,packet.reservation)||core.bindings.length!==0||core.unexpectedVolumeIds.length!==0||core.cleanupAttention)fail('OPERATOR_ABSENCE_RESERVATION_MISMATCH');
+   const receipt={...await verifyOperatorAbsence({provider:await providerFor(m),packet,target:trustedTarget,now:clock}),role,armed:false,unarmed:true,status:'OPERATOR_VM_ABSENCE_ARCHIVED',operatorReconciliationId:packet.id,bindings:[],deleted:[],vmCleanupVerified:true,requiresOperatorReconciliation:true,archivedAt:clock()};
+   await storage.transaction(async tx=>{
+    const live=await assertMeta(tx,m.token);if(!same(live.reservation,packet.reservation)||!same(await tx.get(CORE),core))fail('HYPERSTACK_GUARD_OBSERVATIONS_CHANGED');
+    if(await tx.get(OPERATOR_ARCHIVE+packet.id))fail('OPERATOR_ABSENCE_ID_REUSED');
+    await tx.put(OPERATOR_ARCHIVE+packet.id,{packet,receipt});await tx.put(ARCHIVE,receipt);await tx.put(ARCHIVE+':'+packet.reservation.nonce,receipt);
+    await tx.delete(CORE);await tx.delete(SECRET);await tx.delete(META);await tx.deleteAlarm();
+   });
+   return receipt;
+  }finally{await release(m.token);}
+ }
+ return Object.freeze({arm,shorten,report,disarm,tick,operatorAbsence});
 }

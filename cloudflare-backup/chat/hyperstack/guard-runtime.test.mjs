@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {hyperstackGuardRuntime} from './guard-runtime.mjs';
 import {hyperstackClient} from './client.mjs';
+import {normalizeVM} from './policy.mjs';
 import {NOW,TARGET,RESERVATION,rawVM,fixture,Store} from './fixtures.mjs';
 const SECRET='DUMMY_HYPERSTACK_API_KEY_OUTSIDE_VM';
 const IMAGE='ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64);
@@ -15,7 +16,7 @@ function harness(role='primary'){
  let time=NOW;const store=new Storage(),s=fixture();
  const factory=(key,target)=>{assert.equal(key,SECRET);assert.deepEqual(target,TARGET);return hyperstackClient(key,{target,fetchImpl:s.fetch,now:()=>time}).destroyClient();};
  const options={target:TARGET,role,providerFactory:factory,now:()=>time};
- return {store,s,runtime:hyperstackGuardRuntime(store,options),fresh:()=>hyperstackGuardRuntime(store,options),set time(t){time=t;},get time(){return time;}};
+ return {store,s,options,runtime:hyperstackGuardRuntime(store,options),fresh:()=>hyperstackGuardRuntime(store,options),set time(t){time=t;},get time(){return time;}};
 }
 test('runtime stores its own key separately and emits only immutable keyless reservation evidence',async()=>{
  const h=harness(),q=reservation(),armed=await h.runtime.arm(q,SECRET);assert.equal(armed.armed,true);assert.equal(armed.name,q.name);assert.equal(armed.image,IMAGE);assert.equal(armed.deadline,q.deadline);assert.equal(armed.expiry,q.deadline);assert.equal(armed.minutes,30);assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);assert(!JSON.stringify(armed).includes(SECRET));assert((await h.store.get('$alarm'))<=NOW+100);
@@ -72,4 +73,33 @@ test('untrusted targets, partial envelopes and provider create capability fail c
  const h=harness(),q=reservation();await assert.rejects(hyperstackGuardRuntime(h.store,{target:{...TARGET,environmentId:99},role:'primary',providerFactory:()=>({}),now:()=>NOW}).arm(q,SECRET));
  await assert.rejects(h.runtime.arm({...RESERVATION},SECRET));await h.runtime.arm(q,SECRET);
  const unsafe=hyperstackGuardRuntime(h.store,{target:TARGET,role:'primary',providerFactory:()=>({list(){},get(){},remove(){},create(){}}),now:()=>NOW});await assert.rejects(unsafe.tick());assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);
+});
+
+function operatorPacket(q){return {version:1,id:'11111111-1111-4111-8111-111111111111',sessionId:'22222222-2222-4222-8222-222222222222',approvalId:'DUMMY_ONE_ACCEPTANCE',reservation:q,allocation:normalizeVM(rawVM({labels:[]})),observedAt:NOW+1000,deleteRequestedAt:NOW+2000,absenceObservedAt:NOW+3000,reason:'MISSING_PROVIDER_LABEL'};}
+async function operatorHarness(){const h=harness(),q=reservation();await h.runtime.arm(q,SECRET);h.time=NOW+300001;const packet=operatorPacket(q);return {h,q,packet,call:(input=packet,patch={})=>hyperstackGuardRuntime(h.store,{...h.options,operatorLocked:true,operatorAbsenceJSON:JSON.stringify(packet),...patch}).operatorAbsence(input)};}
+test('operator absence independently verifies and atomically archives truthful evidence before clearing guard key',async()=>{
+ const {h,q,packet,call}=await operatorHarness(),receipt=await call();assert.equal(receipt.operatorReconciled,true);assert.equal(receipt.reconciliationId,packet.id);assert.equal(receipt.allocationId,'44');assert.equal(receipt.armed,false);assert.equal(receipt.vmCleanupVerified,true);assert.deepEqual(receipt.deleted,[]);assert.deepEqual(receipt.bindings,[]);assert.equal(receipt.billingSettlementPending,true);assert(!JSON.stringify(receipt).includes(SECRET));assert.equal(await h.store.get('hyperstack-guard-key-v1'),undefined);assert.equal(await h.store.get('hyperstack-destroy-reservation'),undefined);assert.equal(await h.store.get('$alarm'),undefined);
+ const archived=await h.store.get('hyperstack-operator-absence-v1:'+packet.id);assert.deepEqual(archived.packet.allocation.labels,[]);assert.equal(archived.packet.reason,'MISSING_PROVIDER_LABEL');assert.equal(h.s.calls.length,3);assert(h.s.calls.every(c=>c.method==='GET'));assert.equal((await h.runtime.report()).status,'OPERATOR_VM_ABSENCE_ARCHIVED');await assert.rejects(h.runtime.arm(q,SECRET));
+});
+test('operator recovery requires locked source authority and exact packet before provider I/O',async()=>{
+ const {h,packet,call}=await operatorHarness();await assert.rejects(call(packet,{operatorLocked:false}));await assert.rejects(call(packet,{operatorAbsenceJSON:undefined}));await assert.rejects(call({...packet,id:'33333333-3333-4333-8333-333333333333'}));assert.equal(h.s.calls.length,0);assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);
+});
+test('operator proof fails closed for live, unrelated, failed inventory and final direct-read failure',async()=>{
+ for(const mode of ['live','unrelated','list','final']){
+  const {h,packet,call}=await operatorHarness();if(mode==='live')h.s.vms.push(rawVM({labels:[]}));if(mode==='unrelated')h.s.vms.push(rawVM({id:45,name:'unrelated',labels:[]}));if(mode==='list')h.s.listHook=()=>Response.json({status:true,instances:'invalid'});
+  if(mode==='final'){const base=h.s.fetch;let gets=0;h.s.fetch=async(url,opt)=>{if(new URL(url).pathname.endsWith('/44')&&++gets===2)return Response.json({status:false,error_reason:'forbidden'},{status:403});return base(url,opt);};}
+  await assert.rejects(call());assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);assert.equal(await h.store.get('hyperstack-operator-absence-v1:'+packet.id),undefined);assert(h.s.calls.every(c=>c.method==='GET'));
+ }
+});
+test('old operator replay returns its exact archive and cannot erase a newer guard reservation',async()=>{
+ const {h,packet,call}=await operatorHarness(),first=await call();const next=reservation('b'.repeat(32),h.time);await h.runtime.arm(next,SECRET);const before={meta:await h.store.get('hyperstack-guard-runtime-v1'),core:await h.store.get('hyperstack-destroy-reservation'),alarm:await h.store.get('$alarm')},calls=h.s.calls.length;
+ assert.deepEqual(await call(),first);assert.deepEqual(await h.store.get('hyperstack-guard-runtime-v1'),before.meta);assert.deepEqual(await h.store.get('hyperstack-destroy-reservation'),before.core);assert.equal(await h.store.get('$alarm'),before.alarm);assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);assert.equal(h.s.calls.length,calls);
+ const changed={...packet,observedAt:packet.observedAt+1};await assert.rejects(call(changed,{operatorAbsenceJSON:JSON.stringify(changed)}));assert.equal((await h.runtime.report()).name,next.name);
+});
+test('existing bindings, volume evidence and observations changed during proof retain all guard state',async()=>{
+ for(const mode of ['binding','volume','race']){
+  const {h,packet,call}=await operatorHarness();let core=await h.store.get('hyperstack-destroy-reservation');if(mode==='binding')core.bindings=[normalizeVM(rawVM())];if(mode==='volume')core.unexpectedVolumeIds=['77'];await h.store.put('hyperstack-destroy-reservation',core);
+  if(mode==='race'){const base=h.s.fetch;let gets=0;h.s.fetch=async(url,opt)=>{const r=await base(url,opt);if(new URL(url).pathname.endsWith('/44')&&++gets===2){const changed=await h.store.get('hyperstack-destroy-reservation');changed.unexpectedVolumeIds=['77'];await h.store.put('hyperstack-destroy-reservation',changed);}return r;};}
+  await assert.rejects(call());assert.equal(await h.store.get('hyperstack-guard-key-v1'),SECRET);assert.equal(await h.store.get('hyperstack-operator-absence-v1:'+packet.id),undefined);
+ }
 });

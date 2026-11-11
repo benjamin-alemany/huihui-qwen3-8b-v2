@@ -31,6 +31,7 @@ export class StopReservation extends DurableObject {
       target=validateTarget(JSON.parse(encoded));
     }catch{throw Error('Trusted Hyperstack guard target is invalid');}
     return hyperstackGuardRuntime(this.ctx.storage,{target,role:this.env.CHAT_STOP_ROLE,
+      operatorAbsenceJSON:this.env.OPERATOR_ABSENCE_RECONCILIATION_JSON,operatorLocked:this.env.GUARD_ARM_ENABLED==='false',
       providerFactory:(key,boundTarget)=>hyperstackClient(key,{target:boundTarget}).destroyClient()});
   }
   async #legacyOnly(){
@@ -84,6 +85,10 @@ export class StopReservation extends DurableObject {
     });return {unarmed:true};
   }
   async alarm(){await this.tick();}
+  async operatorAbsence(packet){
+    if(this.env.HOSTING_PROVIDER!=='hyperstack'||this.env.GUARD_ARM_ENABLED!=='false')throw Error('Operator absence requires locked Hyperstack guard');
+    return (await this.#hyperRuntime()).operatorAbsence(packet);
+  }
   async tick(){
     if(this.env.HOSTING_PROVIDER==='hyperstack')return (await this.#hyperRuntime()).tick();
     await this.#legacyOnly();
@@ -120,6 +125,7 @@ export class GuardAdmin extends WorkerEntrypoint {
   shorten(name,at){return stub(this.env).shorten(name,at);}
   disarm(name,proof){return stub(this.env).disarm(name,proof);}
   report(){return stub(this.env).report();}
+  operatorAbsence(packet){return stub(this.env).operatorAbsence(packet);}
 }
 export default {
   fetch(){return new Response('Not found',{status:404});},
