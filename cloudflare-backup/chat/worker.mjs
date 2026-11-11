@@ -233,7 +233,7 @@ export default {
         return json({error:e instanceof Rejection?e.message:"Chat unavailable; no actions were executed"},e instanceof Rejection?e.status:502);
       }finally{if(ticket)try{await quota.release(ticket);}catch{/* Lease expires; never send a second model request. */}}
     }
-    if(request.method!=="GET"||!["/","/index.html","/app.js","/recovery.js","/session.js","/session-ui.js","/session-policy-ui.js","/autosave.js","/style.css"].includes(url.pathname))return json({error:"Not found"},404);
+    if(request.method!=="GET"||!["/","/index.html","/app.js","/recovery.js","/session.js","/session-ui.js","/session-policy-ui.js","/release-ui.js","/autosave.js","/style.css"].includes(url.pathname))return json({error:"Not found"},404);
     const r=await env.ASSETS.fetch(request),h=new Headers(r.headers);
     for(const [key,value]of Object.entries(headers))h.set(key,value);
     return new Response(r.body,{status:r.status,headers:h});

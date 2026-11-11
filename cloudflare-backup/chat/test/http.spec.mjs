@@ -3,6 +3,20 @@ import {exports,env} from "cloudflare:workers";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import {MODEL} from "../policy.mjs";
 import gateway from '../worker.mjs';
+it('serves the complete authenticated browser module graph through ASSETS with security headers',async()=>{
+ const issuer='https://assets-dummy-test.cloudflareaccess.com',bound={...env,ACCESS_ISSUER:issuer};
+ const {privateKey,publicKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='dummy-assets-test';
+ const token=await new SignJWT({sub:'owner',email:env.OWNER_EMAIL,iss:issuer,aud:env.ACCESS_AUD,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600}).setProtectedHeader({alg:'RS256',kid:jwk.kid}).sign(privateKey);
+ const spy=vi.spyOn(globalThis,'fetch').mockImplementation(async url=>{expect(String(url)).toBe(issuer+'/cdn-cgi/access/certs');return Response.json({keys:[jwk]});});
+ const request=path=>new Request('https://unjailed.work'+path,{headers:{'Cf-Access-Jwt-Assertion':token}});
+ const secure=async path=>{const r=await gateway.fetch(request(path),bound);expect(r.status,path).toBe(200);expect(r.headers.get('Cache-Control')).toBe('no-store');expect(r.headers.get('X-Content-Type-Options')).toBe('nosniff');expect(r.headers.get('Referrer-Policy')).toBe('no-referrer');expect(r.headers.get('Content-Security-Policy')).toContain("script-src 'self'");expect(r.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");return r;};
+ try{
+  expect((await gateway.fetch(new Request('https://unjailed.work/release-ui.js'),bound)).status).toBe(401);
+  const html=await (await secure('/')).text(),queue=Array.from(html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/g),m=>m[1]),seen=new Set();expect(queue.length).toBeGreaterThan(0);
+  while(queue.length){const path=queue.shift();if(seen.has(path))continue;seen.add(path);const r=await secure(path);expect(r.headers.get('Content-Type')).toMatch(/(?:java|ecma)script/);const source=await r.text();for(const m of source.matchAll(/(?:import|export)\s+(?:[^'";]*?\s+from\s*)?['"](\.{1,2}\/[^'"]+)['"]/g)){const u=new URL(m[1],'https://unjailed.work'+path);expect(u.origin).toBe('https://unjailed.work');queue.push(u.pathname);}}
+  expect(seen.has('/release-ui.js')).toBe(true);expect(seen.has('/session-policy-ui.js')).toBe(true);expect((await gateway.fetch(request('/session-ui.test.mjs'),bound)).status).toBe(404);
+ }finally{spy.mockRestore();}
+});
 it("requires the signed owner JWT and same-origin JSON before contacting inference",async()=>{
  const {privateKey,publicKey}=await generateKeyPair("RS256"),jwk=await exportJWK(publicKey);jwk.kid="dummy-http-test";
  const token=async(overrides={})=>new SignJWT({sub:"owner",email:env.OWNER_EMAIL,iss:env.ACCESS_ISSUER,aud:env.ACCESS_AUD,
