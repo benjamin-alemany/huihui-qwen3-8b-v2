@@ -9,8 +9,8 @@ def server_tcp(address,port,family=socket.AF_INET):
  s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((address,port));s.listen()
  while True:
   c,_=s.accept();c.sendall(b'DUMMY');c.close()
-def server_udp(logname='dns.received'):
- s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('0.0.0.0',53))
+def server_udp(address,logname='dns.received'):
+ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind((address,53))
  while True:
   data,address=s.recvfrom(256)
   with (work/logname).open('a') as f:f.write('DUMMY\n')
@@ -25,13 +25,13 @@ def denied(fn):
 def dns(address):
  with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.settimeout(.3);s.sendto(b'DUMMY',(address,53));return s.recv(10)
 if mode=='outside':
- work.chmod(0o755);start(server_udp)
+ work.chmod(0o755);start(server_udp,'1.1.1.1')
  for ip,port,family in [('0.0.0.0',8080,socket.AF_INET),('0.0.0.0',7844,socket.AF_INET),('0.0.0.0',80,socket.AF_INET),('::',8080,socket.AF_INET6),('::',7844,socket.AF_INET6)]:start(server_tcp,ip,port,family)
  (work/'outside.ready').touch();time.sleep(120)
 elif mode=='model-server':
  start(server_tcp,'0.0.0.0',8000);(work/'model.ready').touch();time.sleep(120)
 elif mode=='host-server':
- start(server_tcp,'0.0.0.0',9090);start(server_tcp,'0.0.0.0',53);start(server_udp,'host-dns.received')
+ start(server_tcp,'0.0.0.0',9090);start(server_tcp,'0.0.0.0',53);start(server_udp,'10.203.0.1','host-dns.received')
  abstract=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET);abstract.bind('\0unjailed-dummy-host-control');abstract.listen()
  (work/'host.ready').touch();time.sleep(120)
 elif mode=='baseline':
