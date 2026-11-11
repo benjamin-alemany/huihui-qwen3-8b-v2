@@ -5,7 +5,9 @@ It is a pinned `candidate`, not an accepted production release. The serving imag
 bootstrap package lock, bundle digest, compressed size, source commit and runtime
 orchestrator are pinned. The exact image passed free published-artifact checks
 for copied code, offline cache and runtime imports; native acceptance is pending.
-Both source approval pins in `approval.mjs` remain null. Account catalog IDs and
+The exact candidate acceptance source pin is set; production approval remains null.
+A separate durable one-use owner authorization and locked deployment flags still
+control whether acceptance may create anything. Account catalog IDs and
 passing CPU tests do not prove driver, toolkit, container or model compatibility.
 
 Use the reviewed GitHub branch for code. Keep account environment/key names,
