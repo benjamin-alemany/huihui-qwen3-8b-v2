@@ -4,7 +4,7 @@
 It is a pinned `candidate`, not an accepted production release. The serving image,
 bootstrap package lock, bundle digest, compressed size, source commit, runtime
 orchestrator, GPU flavor and region are pinned. The current candidate selects
-one on-demand A100 80 GB PCIe in CANADA-1, retaining the unchanged serving and
+one on-demand A6000 48 GB in CANADA-1, retaining the unchanged serving and
 host bootstrap artifacts. The exact image passed free published-artifact checks
 for copied code, offline cache and runtime imports; native acceptance is pending.
 An earlier recorded acceptance stopped at provider reservation identity readback,

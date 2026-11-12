@@ -12,8 +12,8 @@ test('source acceptance is limited to the exact owner-approved candidate and can
  for(const field of ['servingImage','bootstrapBundleSha256','bootstrapSourceCommit']){const changed=structuredClone(manifest);changed.artifact[field]='unreviewed';assert.equal(releaseApprovedFor('acceptance',changed),false);}
 });
 test('source acceptance cannot silently switch GPU flavor or region',()=>{
- assert.equal(manifest.hosting.flavor,'n3-A100x1');
- for(const [field,value] of [['flavor','n3-RTX-A6000x1'],['flavor','n3-A100x2'],['region','NORWAY-1']]){
+ assert.equal(manifest.hosting.flavor,'n3-RTX-A6000x1');
+ for(const [field,value] of [['flavor','n3-A100x1'],['flavor','n3-A100x2'],['region','NORWAY-1']]){
   const changed=structuredClone(manifest);changed.hosting[field]=value;
   assert.equal(releaseApprovedFor('acceptance',changed),false);
  }

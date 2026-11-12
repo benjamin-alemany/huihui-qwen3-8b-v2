@@ -23,7 +23,7 @@ The trusted host bundle now emits bounded, keyless progress through fixed consol
 
 Cloud autosave, revision conflicts, durable idempotent turns, draft-aware backups, fixed session limits and repeat-session controls are implemented. Historical/test and ordinary-use ledgers stay separate. Ordinary allowance remains zero; owner grants never purchase provider credits or renew sessions automatically. Unknown create or cleanup outcomes retain holds and guards.
 
-The current candidate targets one on-demand A100 80 GB PCIe in CANADA-1 (`n3-A100x1`). Source approval binds that flavor and region explicitly. The controller uses a closed hardware profile and its separately configured hourly ceiling; prior A6000 reservation parsing remains supported for historical cleanup. The serving image, offline checkpoint, host bundle, isolation and session timers are unchanged. Spot and other flavors are not automatic substitutes. Native A100 acceptance remains outstanding.
+The current candidate targets one on-demand A6000 48 GB in CANADA-1 (`n3-RTX-A6000x1`). Source approval binds that flavor and region explicitly. The controller uses a closed hardware profile and its separately configured hourly ceiling; prior A6000 reservation parsing remains supported for historical cleanup. The serving image, offline checkpoint, host bundle, isolation and session timers are unchanged. Spot and other flavors are not automatic substitutes. Native acceptance remains outstanding. Reviewed A100 profile support remains available in code but is not selected by the active source approval.
 
 ## Remaining release gates
 
