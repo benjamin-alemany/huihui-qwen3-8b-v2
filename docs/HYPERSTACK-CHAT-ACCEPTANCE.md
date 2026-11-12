@@ -2,14 +2,14 @@
 
 This is the current public acceptance runbook. It authorizes no deployment,
 funding, VM or retry. Use the reviewed release and private operational plan with
-fresh stock, price, remaining allowance and explicit owner approval. The previous
+fresh stock, price, remaining allowance and explicit owner approval. A historical
 single allocation failed provider identity checks and was deleted/reconciled;
 its approval cannot be reused. See [current status](PROJECT-STATUS.md) and the
 [release record](../release/README.md).
 
 ## Before creation
 
-- Use one exact Hyperstack RTX A6000 target and immutable serving/bootstrap pins.
+- Use the exact reviewed Hyperstack A100 80 GB PCIe target and immutable serving/bootstrap pins.
   Keep ordinary allowance and all agent/terminal tools off. No provider shopping
   or automatic retry is part of acceptance.
 - Require the approved quote, preserved historical ledgers, no unresolved resource

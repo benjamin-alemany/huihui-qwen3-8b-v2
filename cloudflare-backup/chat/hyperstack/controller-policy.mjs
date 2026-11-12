@@ -1,6 +1,6 @@
 import canonicalRelease from '../../../release/manifest.json' with {type:'json'};
 import {SCALE,units,dollars,SessionError} from '../controller/session-policy.mjs';
-import {PROVIDER,INFERENCE_ORIGIN,validateTarget,validateReservation,matchesReservation} from './policy.mjs';
+import {PROVIDER,INFERENCE_ORIGIN,validateTarget,targetProfile,validateReservation,matchesReservation} from './policy.mjs';
 
 const durations=Object.freeze([...canonicalRelease.sessions.allowedMinutes]);
 const imagePattern=/^ghcr\.io\/benjamin-alemany\/huihui-qwen3-8b-v2@sha256:[a-f0-9]{64}$/;
@@ -12,6 +12,7 @@ const finite=n=>typeof n==='number'&&Number.isFinite(n);
 // provider, connects an account, unlocks Start, or changes a stored ledger.
 export function hyperstackLifecycle({target,release}={}){
   let t;try{t=validateTarget(target);}catch{reject('HYPERSTACK_TARGET_UNVERIFIED',503);}
+  const profile=targetProfile(t);
   // A fully pinned candidate may be used for a separately approved acceptance
   // test. It is not equivalent to a verified production release or authorization
   // to run one. Root deployment/acceptance gates remain independent.
@@ -40,14 +41,14 @@ export function hyperstackLifecycle({target,release}={}){
     return p;
   }
   const quoteCatalog=c=>{
-    if(c?.provider!==PROVIDER||c.gpu!=='RTX-A6000'||!finite(c.gpuHourly)||c.gpuHourly<=0||!finite(c.totalHourly)||c.totalHourly<c.gpuHourly||c.totalHourly>t.maximumHourlyUSD||!['AVAILABLE','NONE'].includes(c.availability))reject('HYPERSTACK_CATALOG_INVALID',503);
+    if(c?.provider!==PROVIDER||c.gpu!==profile.gpu||!finite(c.gpuHourly)||c.gpuHourly<=0||!finite(c.totalHourly)||c.totalHourly<c.gpuHourly||c.totalHourly>t.maximumHourlyUSD||!['AVAILABLE','NONE'].includes(c.availability))reject('HYPERSTACK_CATALOG_INVALID',503);
     return c;
   };
   return Object.freeze({
     provider:PROVIDER,ownershipPolicy,image,target:t,binding,
     catalogFrom(raw){
-      if(raw?.provider!==PROVIDER||raw.catalogVerified!==true||raw.gpu!=='RTX-A6000'||raw.gpuCount!==1||raw.vramGB!==48||raw.cpu!==28||raw.ramGB!==58||raw.rootDiskGB!==100||JSON.stringify(raw.target)!==JSON.stringify(t)||!finite(raw.publicIpHourlyUSD)||raw.publicIpHourlyUSD<0||raw.totalHourlyUSD!==raw.gpuHourlyUSD+raw.publicIpHourlyUSD)reject('HYPERSTACK_CATALOG_INVALID',503);
-      return quoteCatalog({provider:PROVIDER,gpu:'RTX-A6000',gpuHourly:raw.gpuHourlyUSD,totalHourly:raw.totalHourlyUSD,availability:raw.availability});
+      if(raw?.provider!==PROVIDER||raw.catalogVerified!==true||raw.gpu!==profile.gpu||raw.gpuCount!==profile.count||raw.vramGB!==profile.vramGB||raw.cpu!==profile.cpu||raw.ramGB!==profile.ram||raw.rootDiskGB!==profile.disk||JSON.stringify(raw.target)!==JSON.stringify(t)||!finite(raw.publicIpHourlyUSD)||raw.publicIpHourlyUSD<0||raw.totalHourlyUSD!==raw.gpuHourlyUSD+raw.publicIpHourlyUSD)reject('HYPERSTACK_CATALOG_INVALID',503);
+      return quoteCatalog({provider:PROVIDER,gpu:profile.gpu,gpuHourly:raw.gpuHourlyUSD,totalHourly:raw.totalHourlyUSD,availability:raw.availability});
     },
     quoteMinutes(input,validationMode=false){
       if(input===undefined)input={};
@@ -59,8 +60,8 @@ export function hyperstackLifecycle({target,release}={}){
       // SCALE comes from the common durable ledger; Hyperstack never seeds,
       // resets or changes the existing acceptance/ordinary budget here.
       const holdUnits=units(c.totalHourly*(minutes+5)/60);if(!Number.isSafeInteger(holdUnits)||holdUnits<=0||holdUnits/SCALE>10)reject('HYPERSTACK_QUOTE_INVALID',400);
-      return {id,provider:PROVIDER,minutes,gpu:'RTX-A6000',gpuHourlyUSD:c.gpuHourly,totalHourlyUSD:c.totalHourly,maximumUSD:dollars(holdUnits),holdUnits,availability:c.availability,quotedAt:now,expiresAt:now+60_000,
-        includes:'RTX A6000 VM, 100 GB temporary root disk, public IPv4, cold start and 5-minute stop/cleanup margin',
+      return {id,provider:PROVIDER,minutes,gpu:profile.gpu,gpuHourlyUSD:c.gpuHourly,totalHourlyUSD:c.totalHourly,maximumUSD:dollars(holdUnits),holdUnits,availability:c.availability,quotedAt:now,expiresAt:now+60_000,
+        includes:`${profile.gpu==='RTX-A6000'?'RTX A6000':profile.gpu} VM, ${profile.disk} GB temporary root disk${profile.ephemeral?`, ${profile.ephemeral} GB temporary ephemeral disk`:''}, public IPv4, cold start and 5-minute stop/cleanup margin`,
         excludes:'Tax/FX if applicable; existing domain; credit deposits are separate from usage; provider failures can exceed the operational allowance'};
     },
     reservation(now,nonce,minutes=30){

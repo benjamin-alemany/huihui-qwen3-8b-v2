@@ -5,6 +5,7 @@ import {IMAGE,GPU,reservation,SCALE,SEED} from '../session-policy.mjs';
 import {TARGET as HYPER_TARGET,rawVM} from '../../hyperstack/fixtures.mjs';
 import manifest from '../../../../release/manifest.json' with {type:'json'};
 import {hyperstackLifecycle} from '../../hyperstack/controller-policy.mjs';
+import {hyperstackClient} from '../../hyperstack/client.mjs';
 import {normalizeVM,validateReservation} from '../../hyperstack/policy.mjs';
 import {verifyOperatorAbsence} from '../../hyperstack/operator-absence.mjs';
 it('has no public admin/start/inference endpoint',async()=>{
@@ -130,7 +131,8 @@ it('a trusted recovery directive always blocks Start and context even when launc
 });
 
 async function recoveryControllerFixture(){
- const name=crypto.randomUUID(),stub=env.SESSION_CONTROLLER.getByName(name),target={...HYPER_TARGET,imageId:manifest.hosting.vmImageId},lifecycle=hyperstackLifecycle({target,release:manifest}),start=Date.now()-10*60000;
+ const name=crypto.randomUUID(),stub=env.SESSION_CONTROLLER.getByName(name),target={...HYPER_TARGET,imageId:manifest.hosting.vmImageId};
+ const historicalRelease={...structuredClone(manifest),hosting:{...manifest.hosting,flavor:target.flavorName,region:target.region}},lifecycle=hyperstackLifecycle({target,release:historicalRelease}),start=Date.now()-10*60000;
  const historical=lifecycle.reservation(start,'a'.repeat(32),30);delete historical.ownershipPolicy;const q=validateReservation(historical),quote=lifecycle.makeQuote({provider:'hyperstack',gpu:'RTX-A6000',gpuHourly:.5,totalHourly:.50672043,availability:'AVAILABLE'},start,crypto.randomUUID(),30);
  const packet={version:1,id:crypto.randomUUID(),sessionId:crypto.randomUUID(),approvalId:'DUMMY_ONE_ACCEPTANCE',reservation:q,allocation:normalizeVM(rawVM({name:q.name,created_at:new Date(start+1000).toISOString(),labels:[]})),observedAt:start+2000,deleteRequestedAt:start+3000,absenceObservedAt:start+4000,reason:'MISSING_PROVIDER_LABEL'};
  const policy={id:'operator-budget-0123456789abcdef',capUnits:2*SCALE,spentFloorUnits:Math.round(.4*SCALE)},ledger={...structuredClone(SEED),cap:policy.capUnits,spent:policy.spentFloorUnits,held:quote.holdUnits,usedApprovals:['DUMMY_EARLIER_APPROVAL',packet.approvalId],operatorBudgetReconciliations:[policy]},ordinaryLedger={version:1,cap:0,spent:0,held:0,grantCount:0};
@@ -138,7 +140,14 @@ async function recoveryControllerFixture(){
  const guardCalls=[];let guardFailure=false;
  const guard=role=>({operatorAbsence:async p=>{guardCalls.push([role,'rpc']);expect(p).toEqual(packet);if(guardFailure&&role==='backup')throw Error('DUMMY_GUARD_UNCONFIRMED');const provider={get:async id=>{guardCalls.push([role,'get',id]);return null;},list:async()=>{guardCalls.push([role,'list']);return [];}};return {...await verifyOperatorAbsence({provider,packet:p,target,now:Date.now}),role,armed:false,bindings:[],deleted:[]};}});
  const patch={HOSTING_PROVIDER:'hyperstack',START_ENABLED:'false',VALIDATION_MODE:'true',APPROVED_ACCEPTANCE_ID:packet.approvalId,HYPERSTACK_TARGET_JSON:JSON.stringify(target),HYPERSTACK_API_KEY:'DUMMY_HYPERSTACK_RECOVERY_KEY',MAX_ACCEPTANCE_USD:'.35',MAX_SESSION_HOURLY_USD:'.507',CLOUDFLARE_ACCOUNT_ID:'1'.repeat(32),CF_TAIL_TOKEN:'D'.repeat(40),ORIGINAL_ACCEPTANCE_JSON:JSON.stringify({capUSD:.51,spentUSD:.4,remainingUSD:.11}),OPERATOR_BUDGET_RECONCILIATION:JSON.stringify(policy),OPERATOR_ABSENCE_RECONCILIATION_JSON:JSON.stringify(packet),PRIMARY_GUARD:guard('primary'),BACKUP_GUARD:guard('backup')};
- const configure=async object=>runInDurableObject(object,i=>{i.env={...i.env,...patch};});await configure(stub);
+ const configure=async object=>runInDurableObject(object,i=>{
+  i.env={...i.env,...patch};
+  // Reconstruct the historical A6000 engine explicitly for these recovery-only
+  // fixtures. The current production factory keeps its strict A100 release pin;
+  // this dependency injection never authorizes an old target for a new launch.
+  const baseEngine=Object.getPrototypeOf(i).engine;
+  i.engine=()=>{const engine=baseEngine.call(i);engine.lifecycle=lifecycle;engine.d.lifecycle=lifecycle;engine.d.provider=hyperstackClient('DUMMY_HYPERSTACK_RECOVERY_KEY',{target});engine.d.enabled=false;return engine;};
+ });await configure(stub);
  await runInDurableObject(stub,async(_,ctx)=>{await ctx.storage.put('session-ledger-v1',record);await ctx.storage.put('session-start-v1:'+quote.id,{sessionId:packet.sessionId,budgetKind:'test'});await ctx.storage.setAlarm(Date.now()+60000);});
  const fetchCalls=[],fetchImpl=async(url,opt={})=>{const u=new URL(url);fetchCalls.push({path:u.pathname,method:opt.method??'GET'});expect(u.origin).toBe('https://infrahub-api.nexgencloud.com');expect(opt.method??'GET').toBe('GET');if(u.pathname==='/v1/core/virtual-machines/44')return Response.json({status:false,error_reason:'not_found'},{status:404});expect(u.pathname).toBe('/v1/core/virtual-machines');return Response.json({status:true,page:1,page_size:100,count:0,instances:[]});};
  return {name,stub,packet,record,quote,configure,fetchCalls,fetchImpl,guardCalls,setGuardFailure:value=>{guardFailure=value;}};

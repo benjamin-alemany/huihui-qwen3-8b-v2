@@ -18,6 +18,11 @@ test('provider timestamps without a suffix remain UTC on a non-UTC operator mach
  const script=`import {validateOperatorAbsence} from ${JSON.stringify(new URL('./operator-absence.mjs',import.meta.url).href)}; validateOperatorAbsence(${JSON.stringify(p)},{target:${JSON.stringify(TARGET)},now:${CLOSED}});`;
  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{env:{...process.env,TZ:'Pacific/Honolulu'},encoding:'utf8'});assert.equal(result.status,0,result.stderr);
 });
+test('historical missing-label exception remains A6000-only after another target is reviewed',()=>{
+ const p=packet(),target={...TARGET,flavorId:77,flavorName:'n3-A100x1',maximumHourlyUSD:1.36};
+ p.reservation.target=target;p.allocation.flavor={...p.allocation.flavor,id:77,name:target.flavorName};
+ assert.throws(()=>validateOperatorAbsence(p,{target,now:CLOSED}),/OPERATOR_ABSENCE_PACKET_INVALID/);
+});
 test('wrong identity, extra controls, labels, volumes and incoherent or future times refuse',()=>{
  const mutations=[p=>p.extra=true,p=>p.version=2,p=>p.id='bad',p=>p.approvalId='',p=>p.reason='DEFINITE_NO_CREATE',p=>p.allocation.name='unrelated',p=>p.allocation.labels=['unjailed:'+p.reservation.nonce],p=>p.allocation.volumeIds=['77'],p=>p.allocation.user_data='DUMMY_SECRET',p=>p.allocation.artifactVerified=true,p=>p.allocation.environment.id=99,p=>p.allocation.flavor.count=2,p=>p.allocation.createdAt=new Date(NOW-1).toISOString(),p=>p.allocation.publicIp='999.0.0.1',p=>p.observedAt=NOW-1,p=>p.deleteRequestedAt=NOW,p=>p.absenceObservedAt=NOW+1000,p=>p.absenceObservedAt=CLOSED+1,p=>p.reservation.controlKey='DUMMY_SECRET',p=>p.reservation.target={...p.reservation.target,environmentId:99}];
  for(const mutate of mutations){const p=packet();mutate(p);assert.throws(()=>validateOperatorAbsence(p,{target:TARGET,now:CLOSED}));}

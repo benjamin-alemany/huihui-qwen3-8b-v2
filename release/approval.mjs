@@ -10,6 +10,8 @@ export const APPROVED_ACCEPTANCE_RELEASE=Object.freeze({
   "bootstrapSourceCommit": "f9e8055422e13800f5daa65a3216c44cdd39c848",
   "bootstrapBundleSize": 58303,
   "runtimeOrchestrator": "vm-run-v1",
+  "flavor": "n3-A100x1",
+  "region": "CANADA-1",
   "vmImageId": 574,
   "ownershipPolicy": "nonce-name-v2",
   "runtimeProfile": "vm-inference-v1"
@@ -24,6 +26,8 @@ export function matchesReleasePin(release,pin){
   pin.bootstrapSourceCommit===release.artifact?.bootstrapSourceCommit&&/^[a-f0-9]{40}$/.test(pin.bootstrapSourceCommit??'')&&
   pin.bootstrapBundleSize===release.artifact?.bootstrapBundleSize&&Number.isSafeInteger(pin.bootstrapBundleSize)&&pin.bootstrapBundleSize>0&&pin.bootstrapBundleSize<=262144&&
   pin.runtimeOrchestrator==='vm-run-v1'&&pin.runtimeOrchestrator===release.artifact?.runtimeOrchestrator&&
+  pin.flavor===release.hosting?.flavor&&['n3-RTX-A6000x1','n3-A100x1'].includes(pin.flavor)&&
+  pin.region==='CANADA-1'&&pin.region===release.hosting?.region&&
   pin.vmImageId===release.hosting?.vmImageId&&Number.isSafeInteger(pin.vmImageId)&&pin.vmImageId>0&&
   pin.ownershipPolicy==='nonce-name-v2'&&pin.ownershipPolicy===release.hosting?.ownershipPolicy&&
   pin.runtimeProfile==='vm-inference-v1'&&pin.runtimeProfile===release.artifact?.runtimeProfile);

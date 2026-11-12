@@ -6,7 +6,7 @@ import {hyperstackLifecycle} from './controller-policy.mjs';
 import {normalizeVM} from './policy.mjs';
 import {TARGET,NOW,Store,rawVM} from './fixtures.mjs';
 const PROVIDER_KEY='DUMMY_PROVIDER_KEY_NEVER_BOOTSTRAP',OUTER_KEY='o'.repeat(64),MODEL_KEY='m'.repeat(64);
-const release=()=>({...structuredClone(manifest),status:'candidate',artifact:{...manifest.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'c'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...manifest.hosting,vmImageId:TARGET.imageId}});
+const release=()=>({...structuredClone(manifest),status:'candidate',artifact:{...manifest.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'c'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...manifest.hosting,flavor:TARGET.flavorName,region:TARGET.region,vmImageId:TARGET.imageId}});
 const tunnel={AccountTag:'a'.repeat(32),TunnelID:'11111111-1111-4111-8111-111111111111',TunnelSecret:btoa('D'.repeat(32))};
 const environment=()=>({HOSTING_PROVIDER:'hyperstack',CLOUDFLARE_ACCOUNT_ID:'1'.repeat(32),CF_TAIL_TOKEN:'D'.repeat(40),START_ENABLED:'true',VALIDATION_MODE:'true',APPROVED_ACCEPTANCE_ID:'DUMMY_ACCEPTANCE',HYPERSTACK_TARGET_JSON:JSON.stringify(TARGET),HYPERSTACK_API_KEY:PROVIDER_KEY,HYPERSTACK_HOST_TUNNEL_CREDENTIAL_JSON:JSON.stringify(tunnel),ORIGINAL_ACCEPTANCE_JSON:JSON.stringify({capUSD:.51,spentUSD:.4,remainingUSD:.11}),OPERATOR_BUDGET_RECONCILIATION:JSON.stringify({id:'operator-budget-0123456789abcdef',capUnits:10000000000,spentFloorUnits:4000000000})});
 function prepared(){

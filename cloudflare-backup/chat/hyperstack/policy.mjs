@@ -14,6 +14,12 @@ export const SOURCES=Object.freeze({
 const plain=o=>o!==null&&typeof o==='object'&&!Array.isArray(o);
 const int=n=>Number.isSafeInteger(n)&&n>0;
 const text=(s,max=160)=>typeof s==='string'&&s.length>0&&s.length<=max&&!/[\x00-\x1f\x7f]/.test(s);
+// Closed, reviewed single-GPU shapes only. A target still pins exact catalog
+// IDs, region, image, environment, keypair and its own lower billing ceiling.
+const TARGET_PROFILES=new Map([
+  ['n3-RTX-A6000x1',Object.freeze({flavorName:'n3-RTX-A6000x1',gpu:'RTX-A6000',count:1,cpu:28,ram:58,disk:100,ephemeral:0,vramGB:48,maximumHourlyUSD:1})],
+  ['n3-A100x1',Object.freeze({flavorName:'n3-A100x1',gpu:'A100-80G-PCIe',count:1,cpu:28,ram:120,disk:100,ephemeral:750,vramGB:80,maximumHourlyUSD:1.36})]
+]);
 export function fail(code){throw Error(code);}
 export function providerId(value){if(typeof value==='string'&&/^[1-9][0-9]{0,14}$/.test(value))value=Number(value);if(!int(value))fail('HYPERSTACK_ID_INVALID');return String(value);}
 function id(value){return Number(providerId(value));}
@@ -36,11 +42,13 @@ export function creationTimestampIdentity(value,reservation){
   epoch(value);return value;
 }
 export function validateTarget(t){
-  if(!plain(t)||t.region!=='CANADA-1'||t.flavorName!=='n3-RTX-A6000x1'||t.imageName!=='Ubuntu Server 24.04 LTS (Noble Numbat)'||!text(t.environmentName)||!text(t.keyName)||t.inferenceOrigin!==INFERENCE_ORIGIN)fail('HYPERSTACK_TARGET_INVALID');
+  const profile=plain(t)?TARGET_PROFILES.get(t.flavorName):null;
+  if(!profile||t.region!=='CANADA-1'||t.imageName!=='Ubuntu Server 24.04 LTS (Noble Numbat)'||!text(t.environmentName)||!text(t.keyName)||t.inferenceOrigin!==INFERENCE_ORIGIN)fail('HYPERSTACK_TARGET_INVALID');
   for(const k of ['environmentId','flavorId','imageId'])id(t[k]);
-  if(typeof t.maximumHourlyUSD!=='number'||!Number.isFinite(t.maximumHourlyUSD)||t.maximumHourlyUSD<=0||t.maximumHourlyUSD>1)fail('HYPERSTACK_RATE_LIMIT_INVALID');
+  if(typeof t.maximumHourlyUSD!=='number'||!Number.isFinite(t.maximumHourlyUSD)||t.maximumHourlyUSD<=0||t.maximumHourlyUSD>profile.maximumHourlyUSD)fail('HYPERSTACK_RATE_LIMIT_INVALID');
   return Object.freeze({environmentId:id(t.environmentId),environmentName:t.environmentName,region:t.region,flavorId:id(t.flavorId),flavorName:t.flavorName,imageId:id(t.imageId),imageName:t.imageName,keyName:t.keyName,inferenceOrigin:INFERENCE_ORIGIN,maximumHourlyUSD:t.maximumHourlyUSD});
 }
+export function targetProfile(target){return TARGET_PROFILES.get(validateTarget(target).flavorName);}
 function one(items,predicate,code){if(!Array.isArray(items))fail(code);const found=items.filter(predicate);if(found.length!==1)fail(code);return found[0];}
 function restrictions(r,kind,targetId){
   const field=kind==='flavor'?'has_flavor_restrictions':'has_image_restrictions',items=kind==='flavor'?'compatible_flavors':'compatible_images',key=kind+'_id';
@@ -54,22 +62,22 @@ function restrictions(r,kind,targetId){
 }
 function decimal(n){if(typeof n==='string'&&!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(n))fail('HYPERSTACK_PRICE_INVALID');if(typeof n!=='number'&&typeof n!=='string')fail('HYPERSTACK_PRICE_INVALID');const v=Number(n);if(!Number.isFinite(v)||v<0)fail('HYPERSTACK_PRICE_INVALID');return v;}
 export function validateCatalog(raw,target,now=Date.now()){
-  const t=validateTarget(target),{flavors,images,environments,keypairs,stocks,pricebook}=raw??{};
+  const t=validateTarget(target),profile=TARGET_PROFILES.get(t.flavorName),{flavors,images,environments,keypairs,stocks,pricebook}=raw??{};
   if(flavors?.status!==true||images?.status!==true||environments?.status!==true||keypairs?.status!==true)fail('HYPERSTACK_CATALOG_INVALID');
   const flavor=one(flavors.data?.flatMap(x=>x?.flavors??[]),x=>x?.id===t.flavorId&&x.name===t.flavorName&&x.region_name===t.region,'HYPERSTACK_FLAVOR_UNVERIFIED');
-  if(flavor.gpu!=='RTX-A6000'||flavor.gpu_count!==1||flavor.cpu!==28||flavor.ram!==58||flavor.disk!==100||flavor.ephemeral!==0||flavor.stock_available!==true)fail('HYPERSTACK_FLAVOR_UNAVAILABLE');
+  if(flavor.gpu!==profile.gpu||flavor.gpu_count!==profile.count||flavor.cpu!==profile.cpu||flavor.ram!==profile.ram||flavor.disk!==profile.disk||flavor.ephemeral!==profile.ephemeral||flavor.stock_available!==true)fail('HYPERSTACK_FLAVOR_UNAVAILABLE');
   const image=one(images.images?.flatMap(x=>x?.images??[]),x=>x?.id===t.imageId&&x.name===t.imageName&&x.region_name===t.region,'HYPERSTACK_IMAGE_UNVERIFIED');
   restrictions(image.flavor_restrictions,'flavor',t.flavorId);restrictions(flavor.image_restrictions,'image',t.imageId);
   one(environments.environments,x=>x?.id===t.environmentId&&x.name===t.environmentName&&x.region===t.region,'HYPERSTACK_ENVIRONMENT_UNVERIFIED');
   one(keypairs.keypairs,x=>x?.name===t.keyName&&x.environment?.id===t.environmentId&&x.environment.name===t.environmentName,'HYPERSTACK_KEYPAIR_UNVERIFIED');
   const stock=one(stocks?.stocks,x=>x?.region===t.region&&x['stock-type']==='GPU','HYPERSTACK_STOCK_INVALID');
-  const model=one(stock.models,x=>x?.model==='RTX-A6000','HYPERSTACK_STOCK_INVALID');
+  const model=one(stock.models,x=>x?.model===profile.gpu,'HYPERSTACK_STOCK_INVALID');
   if(!Number.isSafeInteger(model.configurations?.['1x'])||model.configurations['1x']<=0)fail('HYPERSTACK_FLAVOR_UNAVAILABLE');
   const rate=name=>{const p=one(pricebook,x=>x?.name===name,'HYPERSTACK_PRICE_UNVERIFIED');if(p.start_time!==null&&p.start_time!==undefined&&epoch(p.start_time)>now)fail('HYPERSTACK_PRICE_NOT_ACTIVE');if(p.end_time!==null&&p.end_time!==undefined&&epoch(p.end_time)<=now+65*60_000)fail('HYPERSTACK_PRICE_EXPIRING');return decimal(p.value);};
-  const gpuHourlyUSD=rate('RTX-A6000'),publicIpHourlyUSD=rate('PublicIP');
+  const gpuHourlyUSD=rate(profile.gpu),publicIpHourlyUSD=rate('PublicIP');
   if(['vCPU','RAM','hypervisor-local-storage'].some(n=>rate(n)!==0))fail('HYPERSTACK_EXTRA_COMPUTE_PRICE');
   const totalHourlyUSD=gpuHourlyUSD+publicIpHourlyUSD;if(totalHourlyUSD>t.maximumHourlyUSD)fail('HYPERSTACK_RATE_TOO_HIGH');
-  return {provider:PROVIDER,target:t,gpu:'RTX-A6000',gpuCount:1,vramGB:48,cpu:28,ramGB:58,rootDiskGB:100,gpuHourlyUSD,publicIpHourlyUSD,totalHourlyUSD,availability:'AVAILABLE',quotedAt:now,expiresAt:now+60_000,catalogVerified:true,runtimeVerified:false,permissionsVerified:false};
+  return {provider:PROVIDER,target:t,gpu:profile.gpu,gpuCount:profile.count,vramGB:profile.vramGB,cpu:profile.cpu,ramGB:profile.ram,rootDiskGB:profile.disk,gpuHourlyUSD,publicIpHourlyUSD,totalHourlyUSD,availability:'AVAILABLE',quotedAt:now,expiresAt:now+60_000,catalogVerified:true,runtimeVerified:false,permissionsVerified:false};
 }
 export function normalizeVM(raw){
   if(!plain(raw)||!text(raw.name,50)||!text(raw.status,48)||!text(raw.image?.name)||!text(raw.flavor?.name)||!text(raw.flavor?.gpu)||!text(raw.environment?.name)||!text(raw.environment?.region)||!Array.isArray(raw.labels)||raw.labels.length>32||raw.labels.some(x=>!text(x,100))||!Array.isArray(raw.volume_attachments)||raw.volume_attachments.length>32)fail('HYPERSTACK_VM_INVALID');
@@ -94,7 +102,12 @@ export function validateReservation(r,target){
   }
   return q;
 }
-function targetMatches(p,t){return p.provider===PROVIDER&&p.environment?.id===t.environmentId&&p.environment.name===t.environmentName&&p.environment.region===t.region&&p.flavor?.id===t.flavorId&&p.flavor.name===t.flavorName&&p.flavor.gpu==='RTX-A6000'&&p.flavor.count===1&&p.flavor.cpu===28&&p.flavor.ram===58&&p.flavor.disk===100&&p.bootImageName===t.imageName;}
+function targetMatches(p,t){
+  const profile=TARGET_PROFILES.get(t.flavorName);
+  // Ephemeral capacity is checked in the authenticated flavor catalog. Keep the
+  // established allocation wire shape for historical bindings and guard state.
+  return p.provider===PROVIDER&&p.environment?.id===t.environmentId&&p.environment.name===t.environmentName&&p.environment.region===t.region&&p.flavor?.id===t.flavorId&&p.flavor.name===t.flavorName&&p.flavor.gpu===profile.gpu&&p.flavor.count===profile.count&&p.flavor.cpu===profile.cpu&&p.flavor.ram===profile.ram&&p.flavor.disk===profile.disk&&p.bootImageName===t.imageName;
+}
 export function matchesReservation(p,r){
   const q=validateReservation(r);let created;
   try{created=q.ownershipPolicy===NONCE_NAME_OWNERSHIP?providerCreatedAtUTC(p?.createdAt):Date.parse(p?.createdAt);}catch{return false;}

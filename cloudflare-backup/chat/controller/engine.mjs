@@ -56,7 +56,10 @@ export class SessionEngine {
     const minutes=this.lifecycle.quoteMinutes(input,this.d.validationMode===true);
     const raw=await this.d.catalog(),catalog=this.lifecycle.catalogFrom(raw),q={...this.lifecycle.makeQuote(catalog,this.d.now(),this.d.id(),minutes),live:!!this.d.connected,budgetKind:this.budgetKind(),lifecycleBinding:this.currentBinding()};
     const ceiling=this.d.maxHourly??1;
-    if(!Number.isFinite(ceiling)||ceiling<=0||ceiling>1||catalog.totalHourly>ceiling)throw new SessionError('PRICE_CHANGED');
+    // Only a validated Hyperstack lifecycle may use its explicitly bounded
+    // target rate. Legacy Runpod retains its existing one-dollar ceiling.
+    const targetCeiling=this.lifecycle.provider==='hyperstack'?(this.lifecycle.target?.maximumHourlyUSD??1):1;
+    if(!Number.isFinite(ceiling)||ceiling<=0||!Number.isFinite(targetCeiling)||targetCeiling<=0||ceiling>targetCeiling||catalog.totalHourly>ceiling)throw new SessionError('PRICE_CHANGED');
     return this.tx(r=>{r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,lifecycleBinding:undefined,launchEnabled:this.launchEnabled(r),...this.views(r),includes:q.includes??'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:q.excludes??'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
   }
   async start(input){

@@ -6,7 +6,7 @@ import {hyperstackLifecycle} from './controller-policy.mjs';
 import {CreateError} from './client.mjs';
 import {validateCatalog,normalizeVM,absenceReceipt} from './policy.mjs';
 import {NOW,TARGET,rawVM,catalogRaw,Store} from './fixtures.mjs';
-const pinned=()=>({...structuredClone(release),status:'candidate',artifact:{...release.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'e'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...release.hosting,vmImageId:33}});
+const pinned=()=>({...structuredClone(release),status:'candidate',artifact:{...release.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'e'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...release.hosting,flavor:TARGET.flavorName,region:TARGET.region,vmImageId:33}});
 class EngineStore extends Store{async setAlarm(at){await this.put('$alarm',at);}}
 function harness(){
  let now=NOW,sequence=0,vmSequence=100;

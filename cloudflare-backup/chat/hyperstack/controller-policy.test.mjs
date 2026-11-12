@@ -5,7 +5,7 @@ import {SCALE} from '../controller/session-policy.mjs';
 import {hyperstackLifecycle} from './controller-policy.mjs';
 import {normalizeVM,validateCatalog,absenceReceipt} from './policy.mjs';
 import {NOW,TARGET,rawVM,catalogRaw} from './fixtures.mjs';
-function pinned(status='candidate'){return {...structuredClone(release),status,artifact:{...release.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'e'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...release.hosting,vmImageId:33}};}
+function pinned(status='candidate'){return {...structuredClone(release),status,artifact:{...release.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'e'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...release.hosting,flavor:TARGET.flavorName,region:TARGET.region,vmImageId:33}};}
 const lifecycle=()=>hyperstackLifecycle({target:TARGET,release:pinned()});
 function session(l=lifecycle()){
  const reservation=l.reservation(NOW,'a'.repeat(32),30),quote=l.makeQuote(l.catalogFrom(validateCatalog(catalogRaw(),TARGET,NOW)),NOW,'dummy-quote',30);

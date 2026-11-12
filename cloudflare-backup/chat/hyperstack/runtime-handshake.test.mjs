@@ -8,7 +8,7 @@ import {normalizeVM} from './policy.mjs';
 import {TARGET,NOW,Store,rawVM} from './fixtures.mjs';
 const OUTER='o'.repeat(64),MODEL='m'.repeat(64),MARKER='hyperstack-runtime-handshake-v1:';
 function setup(){
- const release={...structuredClone(manifest),status:'candidate',artifact:{...manifest.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'c'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...manifest.hosting,vmImageId:TARGET.imageId}};
+ const release={...structuredClone(manifest),status:'candidate',artifact:{...manifest.artifact,servingImage:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'a'.repeat(64),bootstrapLockSha256:'b'.repeat(64),bootstrapBundleSha256:'c'.repeat(64),bootstrapSourceCommit:'f'.repeat(40),bootstrapBundleSize:100},hosting:{...manifest.hosting,flavor:TARGET.flavorName,region:TARGET.region,vmImageId:TARGET.imageId}};
  const lifecycle=hyperstackLifecycle({target:TARGET,release}),reservation=lifecycle.reservation(NOW,'a'.repeat(32),30),allocation=normalizeVM(rawVM());
  const session={id:'22222222-2222-4222-8222-222222222222',nonce:reservation.nonce,phase:'validating',createAttempted:true,stopRequested:false,inferenceKey:OUTER,modelKey:MODEL,reservation,bootAt:NOW,deadline:reservation.deadline,quote:{minutes:30},knownPodIds:[allocation.id],knownAllocations:[allocation]};
  const storage=new Store();storage.rows.set('session-ledger-v1',{session});

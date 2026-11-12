@@ -2,8 +2,10 @@
 
 `manifest.json` is the shared model, artifact, hosting and duration record.
 It is a pinned `candidate`, not an accepted production release. The serving image,
-bootstrap package lock, bundle digest, compressed size, source commit and runtime
-orchestrator are pinned. The exact image passed free published-artifact checks
+bootstrap package lock, bundle digest, compressed size, source commit, runtime
+orchestrator, GPU flavor and region are pinned. The current candidate selects
+one on-demand A100 80 GB PCIe in CANADA-1, retaining the unchanged serving and
+host bootstrap artifacts. The exact image passed free published-artifact checks
 for copied code, offline cache and runtime imports; native acceptance is pending.
 An earlier recorded acceptance stopped at provider reservation identity readback,
 before model permission. The source acceptance pin is limited to the exact separately owner-approved candidate; production approval remains closed. No native
@@ -37,7 +39,7 @@ Neither run loaded Qwen or validated the target GPU.
 Subsequent reviewed source fixes refresh owner controller state before quoting,
 preserve safe preflight/cancellation reasons through cleanup, canonicalize the
 exact authenticated Cloudflare logout return, and retain only whitelisted
-create-failure metadata. Latest free coverage passed 322 Node, 26 chat Worker,
+create-failure metadata. Latest free coverage passed 334 Node, 26 chat Worker,
 20 controller Durable Object and 20 guard Durable Object checks. Neither these
 CPU checks nor published-artifact verification establish native target-provider
 acceptance or production promotion.

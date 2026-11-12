@@ -9,7 +9,7 @@ import {NOW,TARGET,Store} from './fixtures.mjs';
 const PREFIX='hyperstack-controller-operator-rejection-v1:';
 class EngineStore extends Store{async setAlarm(n){this.alarm=n;}async deleteAlarm(){this.alarm=null;}}
 async function harness(){
- const release={...structuredClone(manifest),status:'candidate',hosting:{...manifest.hosting,vmImageId:TARGET.imageId}},lifecycle=hyperstackLifecycle({target:TARGET,release});
+ const release={...structuredClone(manifest),status:'candidate',hosting:{...manifest.hosting,flavor:TARGET.flavorName,region:TARGET.region,vmImageId:TARGET.imageId}},lifecycle=hyperstackLifecycle({target:TARGET,release});
  const q=lifecycle.reservation(NOW,'a'.repeat(32),30),quote={...lifecycle.makeQuote({provider:'hyperstack',gpu:'RTX-A6000',gpuHourly:.5,totalHourly:.50672043,availability:'AVAILABLE'},NOW,'33333333-3333-4333-8333-333333333333',30),lifecycleBinding:lifecycle.binding};
  const packet={version:1,id:'11111111-1111-4111-8111-111111111111',sessionId:'22222222-2222-4222-8222-222222222222',approvalId:'DUMMY_ONE_ACCEPTANCE',reservation:q,requestAt:NOW+60000,confirmedAt:NOW+3600000,httpStatus:400,evidenceSHA256:'c'.repeat(64),reason:'PROVIDER_CONFIRMED_NO_CREATE'};
  const session={id:packet.sessionId,quoteId:quote.id,quote,reservation:q,approval:packet.approvalId,budgetKind:'test',createAttempted:true,phase:'attention',stopRequested:true,nonce:q.nonce,bootAt:q.createdNotBefore,deadline:q.deadline,inferenceKey:'DUMMY_PRIVATE_OUTER_KEY',modelKey:'DUMMY_PRIVATE_MODEL_KEY',leaseUntil:0};
