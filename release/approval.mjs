@@ -10,7 +10,7 @@ export const APPROVED_ACCEPTANCE_RELEASE=Object.freeze({
   "bootstrapSourceCommit": "f9e8055422e13800f5daa65a3216c44cdd39c848",
   "bootstrapBundleSize": 58303,
   "runtimeOrchestrator": "vm-run-v1",
-  "flavor": "n3-RTX-A6000x1",
+  "flavor": "n3-A100x1",
   "region": "CANADA-1",
   "vmImageId": 574,
   "ownershipPolicy": "nonce-name-v2",

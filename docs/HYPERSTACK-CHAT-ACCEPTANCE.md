@@ -9,7 +9,7 @@ its approval cannot be reused. See [current status](PROJECT-STATUS.md) and the
 
 ## Before creation
 
-- Use the exact reviewed Hyperstack A6000 48 GB target and immutable serving/bootstrap pins.
+- Use the exact reviewed Hyperstack A100 80 GB target and immutable serving/bootstrap pins.
   Keep ordinary allowance and all agent/terminal tools off. No provider shopping
   or automatic retry is part of acceptance.
 - Require the approved quote, preserved historical ledgers, no unresolved resource
