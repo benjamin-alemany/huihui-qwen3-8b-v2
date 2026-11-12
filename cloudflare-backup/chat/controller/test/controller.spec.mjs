@@ -160,3 +160,40 @@ it('partial guard recovery failure leaves durable hold, approval and session key
   h.setGuardFailure(false);await runDurableObjectAlarm(h.stub);const recovered=await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.get('session-ledger-v1'));expect(recovered.ledger.spent).toBe(h.record.ledger.spent+h.quote.holdUnits);expect(recovered.ledger.held).toBe(0);expect(recovered.session.modelKey).toBeUndefined();expect((await h.stub.status()).operatorRecovery.phase).toBe('verified');
  }finally{await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.deleteAlarm());spy.mockRestore();}
 });
+
+it('private create-rejection recovery blocks Start and inference and refuses conflicting directives',async()=>{
+ const stub=await selectedController({START_ENABLED:'true',OPERATOR_CREATE_REJECTION_JSON:'DUMMY_INVALID_PACKET'}),spy=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw Error('No request allowed');});
+ try{
+  expect((await stub.start({quoteId:'anything',maximumUSD:.35})).error).toBe('OPERATOR_RECOVERY_ACTIVE');expect(await runInDurableObject(stub,i=>i.context())).toBeNull();expect(await runInDurableObject(stub,i=>i.engine().d.enabled)).toBe(false);
+  await runInDurableObject(stub,async(i,ctx)=>{i.env={...i.env,START_ENABLED:'false',VALIDATION_MODE:'true',OPERATOR_ABSENCE_RECONCILIATION_JSON:'DUMMY_CONFLICT'};await ctx.storage.setAlarm(Date.now()+60000);});
+  await runDurableObjectAlarm(stub);expect((await stub.status()).operatorCreateRejection).toMatchObject({phase:'refused',code:'OPERATOR_REJECTION_LOCK_REQUIRED'});expect((await exports.default.fetch(new Request('https://dummy.test/api/operator-create-rejection'))).status).toBe(404);expect(spy).not.toHaveBeenCalled();
+ }finally{await runInDurableObject(stub,(_,ctx)=>ctx.storage.deleteAlarm());spy.mockRestore();}
+});
+
+async function rejectionControllerFixture(){
+ const h=await recoveryControllerFixture(),q=validateReservation({...h.packet.reservation,ownershipPolicy:'nonce-name-v2'});
+ const packet={version:1,id:crypto.randomUUID(),sessionId:h.packet.sessionId,approvalId:h.packet.approvalId,reservation:q,requestAt:q.createdNotBefore+1000,confirmedAt:q.createdNotAfter+1000,httpStatus:400,evidenceSHA256:'e'.repeat(64),reason:'PROVIDER_CONFIRMED_NO_CREATE'};
+ const calls=[],flags={fail:false},guard=role=>({disarm:async(name,proof)=>{calls.push([role,name,proof]);expect(name).toBe(q.name);expect(proof).toEqual({definiteNoCreate:true});if(flags.fail&&role==='backup')throw Error('DUMMY_GUARD_PENDING');return {unarmed:true,armed:false,role,name:q.name,status:'DEFINITE_NO_CREATE_ARCHIVED'};}});
+ const configure=async object=>{await h.configure(object);await runInDurableObject(object,i=>{const next={...i.env,START_ENABLED:'false',VALIDATION_MODE:'true',OPERATOR_CREATE_REJECTION_JSON:JSON.stringify(packet),PRIMARY_GUARD:guard('primary'),BACKUP_GUARD:guard('backup')};delete next.OPERATOR_ABSENCE_RECONCILIATION_JSON;i.env=next;});};
+ h.record.session.reservation=q;
+ h.record.session.quote.lifecycleBinding=await runInDurableObject(h.stub,i=>i.engine().currentBinding());
+ await configure(h.stub);await runInDurableObject(h.stub,async(_,ctx)=>{await ctx.storage.put('session-ledger-v1',h.record);await ctx.storage.setAlarm(Date.now()+60000);});
+ return {...h,packet,configure,rejectionGuardCalls:calls,setGuardFailure:value=>{flags.fail=value;}};
+}
+it('confirmed rejection alarm releases only its hold, keeps the approval consumed and survives SQLite eviction/replay',async()=>{
+ const h=await rejectionControllerFixture(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(h.fetchImpl);
+ try{
+  await evictDurableObject(h.stub);const restored=env.SESSION_CONTROLLER.getByName(h.name);await h.configure(restored);await runDurableObjectAlarm(restored);
+  const after=await runInDurableObject(restored,(_,ctx)=>ctx.storage.get('session-ledger-v1'));
+  expect(after.ledger.held).toBe(0);expect(after.ledger.spent).toBe(h.record.ledger.spent);expect(after.ledger.cap).toBe(h.record.ledger.cap);expect(after.ledger.usedApprovals).toEqual(h.record.ledger.usedApprovals);expect(after.ordinaryLedger).toEqual(h.record.ordinaryLedger);expect(after.session).toMatchObject({phase:'failed',createAttempted:true,definiteNoCreate:true,settledUnits:0,acceptancePassed:false});
+  for(const key of ['inferenceKey','modelKey','nonce'])expect(after.session[key]).toBeUndefined();expect(h.rejectionGuardCalls.map(x=>x[0])).toEqual(['primary','backup']);expect(h.fetchCalls.every(c=>c.method==='GET')).toBe(true);expect((await restored.status()).operatorCreateRejection.phase).toBe('verified');expect((await restored.status()).launchEnabled).toBe(false);expect(await runInDurableObject(restored,(_,ctx)=>ctx.storage.getAlarm())).toBeNull();
+  const reads=h.fetchCalls.length;await runInDurableObject(restored,(_,ctx)=>ctx.storage.setAlarm(Date.now()+60000));await runDurableObjectAlarm(restored);expect(h.fetchCalls.length).toBe(reads);expect((await runInDurableObject(restored,(_,ctx)=>ctx.storage.get('session-ledger-v1'))).ledger).toEqual(after.ledger);expect(h.rejectionGuardCalls.length).toBe(2);
+ }finally{await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.deleteAlarm());spy.mockRestore();}
+});
+it('rejection recovery retains the hold across a guard failure and retries only cleanup',async()=>{
+ const h=await rejectionControllerFixture(),spy=vi.spyOn(globalThis,'fetch').mockImplementation(h.fetchImpl);h.setGuardFailure(true);
+ try{
+  await runDurableObjectAlarm(h.stub);const blocked=await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.get('session-ledger-v1'));expect(blocked.ledger).toEqual(h.record.ledger);expect(blocked.session.definiteNoCreate).toBe(true);expect(blocked.session.modelKey).toBe(h.record.session.modelKey);expect((await h.stub.status()).operatorCreateRejection.phase).toBe('refused');expect(await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.getAlarm())).not.toBeNull();
+  h.setGuardFailure(false);await runDurableObjectAlarm(h.stub);const after=await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.get('session-ledger-v1'));expect(after.ledger.spent).toBe(h.record.ledger.spent);expect(after.ledger.held).toBe(0);expect(after.session.settledUnits).toBe(0);expect(after.session.modelKey).toBeUndefined();expect(h.fetchCalls.every(c=>c.method==='GET')).toBe(true);
+ }finally{await runInDurableObject(h.stub,(_,ctx)=>ctx.storage.deleteAlarm());spy.mockRestore();}
+});

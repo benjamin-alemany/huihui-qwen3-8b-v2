@@ -37,8 +37,8 @@ Neither run loaded Qwen or validated the target GPU.
 Subsequent reviewed source fixes refresh owner controller state before quoting,
 preserve safe preflight/cancellation reasons through cleanup, canonicalize the
 exact authenticated Cloudflare logout return, and retain only whitelisted
-create-failure metadata. Latest free coverage passed 306 Node, 26 chat Worker,
-17 controller Durable Object and 20 guard Durable Object checks. Neither these
+create-failure metadata. Latest free coverage passed 322 Node, 26 chat Worker,
+20 controller Durable Object and 20 guard Durable Object checks. Neither these
 CPU checks nor published-artifact verification establish native target-provider
 acceptance or production promotion.
 

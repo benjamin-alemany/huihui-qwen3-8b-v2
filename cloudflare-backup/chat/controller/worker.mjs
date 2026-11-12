@@ -9,8 +9,11 @@ import {hyperstackControllerFactory} from '../hyperstack/controller-factory.mjs'
 import {renderCloudInit,bootstrapRenderReady} from '../hyperstack/bootstrap-render.mjs';
 import {parseOperatorAbsence} from '../hyperstack/operator-absence.mjs';
 import {reconcileControllerOperatorAbsence} from '../hyperstack/controller-operator-absence.mjs';
+import {parseOperatorRejection} from '../hyperstack/operator-rejection.mjs';
+import {reconcileControllerOperatorRejection} from '../hyperstack/controller-operator-rejection.mjs';
 import bootstrapBundle from '../../../release/bootstrap-payload.json' with {type:'json'};
 const object=env=>env.SESSION_CONTROLLER.getByName('owner-chat-controller-v1');
+const operatorRecoveryActive=env=>env.OPERATOR_ABSENCE_RECONCILIATION_JSON!==undefined||env.OPERATOR_CREATE_REJECTION_JSON!==undefined;
 // Paid Start and the reviewed network-image gate remain locked in production.
 // Owner grants authorize application usage only; no payment or provider top-up.
 export class ChatSessionController extends DurableObject {
@@ -37,7 +40,7 @@ export class ChatSessionController extends DurableObject {
     const now=()=>Date.now(),validationMode=this.env.VALIDATION_MODE==='true';let operatorBudget;try{operatorBudget=parseOperatorBudget(this.env.OPERATOR_BUDGET_RECONCILIATION);}catch{operatorBudget={invalid:true};}
     let originalAcceptance;try{originalAcceptance=parseOriginalAcceptance(this.env.ORIGINAL_ACCEPTANCE_JSON)??undefined;}catch{originalAcceptance=null;}
     return new SessionEngine(this.ctx.storage,{now,id:()=>crypto.randomUUID(),hex:length=>Array.from(crypto.getRandomValues(new Uint8Array(length/2)),b=>b.toString(16).padStart(2,'0')).join(''),
-      operatorBudget:selected?.operatorBudget??operatorBudget,validationMode,enabled:this.env.OPERATOR_ABSENCE_RECONCILIATION_JSON===undefined&&(selected?selected.enabled:this.env.START_ENABLED==='true'&&networkReleaseReady(IMAGE)&&(!validationMode||operatorBudget!==null&&!operatorBudget.invalid)),approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:selected?selected.key:this.env.RUNPOD_API_KEY,
+      operatorBudget:selected?.operatorBudget??operatorBudget,validationMode,enabled:!operatorRecoveryActive(this.env)&&(selected?selected.enabled:this.env.START_ENABLED==='true'&&networkReleaseReady(IMAGE)&&(!validationMode||operatorBudget!==null&&!operatorBudget.invalid)),approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:selected?selected.key:this.env.RUNPOD_API_KEY,
       originalAcceptance:selected?selected.originalAcceptance:originalAcceptance,
       ...(selected?{lifecycle:selected.lifecycle}:{}),
       maxHourly:Number(this.env.MAX_SESSION_HOURLY_USD??'.60'),maxUSD:Number(this.env.MAX_ACCEPTANCE_USD??'.25'),
@@ -52,13 +55,13 @@ export class ChatSessionController extends DurableObject {
   async status(){
     const readiness=await this.ctx.storage.get('readiness')??{phase:'not-checked'},selected=this.#configuration();
     return {...await this.engine().status(),readiness,networkBoundaryReady:selected?selected.readiness.sourceApproved&&selected.readiness.runtimeOrchestratorPrepared:networkReleaseReady(IMAGE),
-      hostingProvider:selected?.readiness.provider??'runpod',operatorRecovery:await this.ctx.storage.get('operator-absence-status-v1')??null,...(selected?{providerReadiness:selected.readiness,launchBlockers:selected.readiness.blockers}:{})};
+      hostingProvider:selected?.readiness.provider??'runpod',operatorRecovery:await this.ctx.storage.get('operator-absence-status-v1')??null,operatorCreateRejection:await this.ctx.storage.get('operator-create-rejection-status-v1')??null,...(selected?{providerReadiness:selected.readiness,launchBlockers:selected.readiness.blockers}:{})};
   }
   async quote(input){try{return await this.engine().quote(input);}catch(e){return {error:e instanceof SessionError?e.code:'QUOTE_UNAVAILABLE',status:e instanceof SessionError?e.status:503};}}
   async grant(input){try{return await this.engine().grant(input);}catch(e){return {error:e instanceof SessionError?e.code:'GRANT_REFUSED',status:e instanceof SessionError?e.status:409};}}
-  async start(input){try{if(this.env.OPERATOR_ABSENCE_RECONCILIATION_JSON!==undefined)throw new SessionError('OPERATOR_RECOVERY_ACTIVE');const selected=this.#configuration();if(selected){if(!selected.enabled)throw new SessionError(selected.readiness.blockers[0]??'LAUNCH_LOCKED',503);}else if(this.env.START_ENABLED==='true'&&!networkReleaseReady(IMAGE))throw new SessionError('NETWORK_BOUNDARY_UNVERIFIED');const r=await this.ctx.storage.get('readiness');if(['pending','checking'].includes(r?.phase))throw new SessionError('READINESS_CHECK_ACTIVE');return await this.engine().start(input);}catch(e){return {error:e instanceof SessionError?e.code:'START_REFUSED',status:e instanceof SessionError?e.status:409};}}
+  async start(input){try{if(operatorRecoveryActive(this.env))throw new SessionError('OPERATOR_RECOVERY_ACTIVE');const selected=this.#configuration();if(selected){if(!selected.enabled)throw new SessionError(selected.readiness.blockers[0]??'LAUNCH_LOCKED',503);}else if(this.env.START_ENABLED==='true'&&!networkReleaseReady(IMAGE))throw new SessionError('NETWORK_BOUNDARY_UNVERIFIED');const r=await this.ctx.storage.get('readiness');if(['pending','checking'].includes(r?.phase))throw new SessionError('READINESS_CHECK_ACTIVE');return await this.engine().start(input);}catch(e){return {error:e instanceof SessionError?e.code:'START_REFUSED',status:e instanceof SessionError?e.status:409};}}
   async stop(input){try{return await this.engine().stop(input);}catch{return {error:'STOP_UNCONFIRMED',status:503};}}
-  context(){if(this.env.OPERATOR_ABSENCE_RECONCILIATION_JSON!==undefined)return null;const selected=this.#configuration();if(selected&&(!selected.readiness.sourceApproved||!selected.readiness.runtimeOrchestratorPrepared||!selected.connected))return null;return this.engine().context();}
+  context(){if(operatorRecoveryActive(this.env))return null;const selected=this.#configuration();if(selected&&(!selected.readiness.sourceApproved||!selected.readiness.runtimeOrchestratorPrepared||!selected.connected))return null;return this.engine().context();}
   async check(){
     if(!terminal((await this.engine().read()).session))throw new SessionError('SESSION_ALREADY_ACTIVE');
     if(this.env.READINESS_ENABLED!=='true'||!this.env.CF_TAIL_TOKEN)throw Error('Cloud guard verification is not configured');
@@ -73,6 +76,22 @@ export class ChatSessionController extends DurableObject {
     return this.status();
   }
   async alarm(){
+    if(this.env.OPERATOR_CREATE_REJECTION_JSON!==undefined){
+      try{
+        if(this.env.OPERATOR_ABSENCE_RECONCILIATION_JSON!==undefined||this.env.START_ENABLED!=='false'||this.env.VALIDATION_MODE!=='true'||this.env.HOSTING_PROVIDER!=='hyperstack')throw new SessionError('OPERATOR_REJECTION_LOCK_REQUIRED',503);
+        const engine=this.engine(),packet=parseOperatorRejection(this.env.OPERATOR_CREATE_REJECTION_JSON,{target:engine.lifecycle.target,now:Date.now()});
+        const result=await reconcileControllerOperatorRejection(engine,packet);
+        await this.ctx.storage.put('operator-create-rejection-status-v1',{id:packet.id,phase:result.complete?'verified':'waiting',at:Date.now(),providerRejected:result.complete===true,settledUnits:result.complete?0:null,acceptancePassed:false});
+        if(!result.complete)await this.ctx.storage.setAlarm(Date.now()+10000);
+        else if(!result.replayed)console.log(JSON.stringify({event:'operator_create_rejection_reconciled',reconciliationId:packet.id,sessionId:packet.sessionId,approvalId:packet.approvalId,provider:'hyperstack',status:'verified',settledUnits:0,acceptancePassed:false,at:new Date().toISOString()}));
+        return;
+      }catch(error){
+        const code=error instanceof SessionError?error.code:'OPERATOR_REJECTION_UNCONFIRMED';
+        await this.ctx.storage.put('operator-create-rejection-status-v1',{phase:'refused',code,at:Date.now()});
+        console.warn(JSON.stringify({event:'operator_create_rejection_refused',code,at:new Date().toISOString()}));
+        await this.ctx.storage.setAlarm(Date.now()+10000);return;
+      }
+    }
     if(this.env.OPERATOR_ABSENCE_RECONCILIATION_JSON!==undefined){
       try{
         const engine=this.engine();

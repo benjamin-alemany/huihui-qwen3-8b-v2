@@ -54,7 +54,7 @@ See `docs/TESTING-AND-RECOVERY.md` for the hardened workflow. Run
 Setup and test phases are separate. Neither phase deploys, downloads a model or
 starts a GPU. Review dependency/runtime risks before executing untrusted changes.
 
-Latest free evidence: 306 Node, 26 chat, 17 controller and 20 guard checks passed. The previously recorded Python suite ran 62 tests with one skip. CPU and published-artifact checks do not establish native target-provider acceptance or production promotion.
+Latest free evidence: 322 Node, 26 chat, 20 controller and 20 guard checks passed. The previously recorded Python suite ran 62 tests with one skip. CPU and published-artifact checks do not establish native target-provider acceptance or production promotion.
 
 The earlier production-source suite also replayed private real tail exports. In this
 public copy that one fixture case uses sanitized scheduled-tail data, so it is

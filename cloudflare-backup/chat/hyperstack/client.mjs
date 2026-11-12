@@ -29,6 +29,16 @@ const responseDiagnostics=(httpStatus,data,responseBytes)=>safeCreateDiagnostics
 export class CreateError extends Error{
   constructor(code,outcome='unknown',diagnostics){super(code);this.name='CreateError';this.code=code;this.outcome=outcome;if(diagnostics)this.diagnostics=safeCreateDiagnostics(diagnostics);}
 }
+function createResourceEvidence(data){const instances=data?.instances;return data?.instance!=null||(Array.isArray(instances)?instances.length>0:instances!=null);}
+function createResponseFailure(status,data,diagnostics){
+  // The fixed provider API defines 4xx as a rejected request, including when
+  // pre-validation supplies no usable JSON body. This says nothing about any
+  // pre-existing resource (for example a 409); guard inventory is still needed.
+  // Contract: https://docs.hyperstack.cloud/docs/api-reference/errors/
+  // Contradictory success/resource evidence must retain the unknown hold.
+  const rejected=status>=400&&status<500&&data?.status!==true&&!createResourceEvidence(data);
+  return new CreateError(rejected?'HYPERSTACK_CREATE_REJECTED':'HYPERSTACK_CREATE_UNCONFIRMED',rejected?'definite-no-create':'unknown',diagnostics);
+}
 // No generic request/URL passthrough is exposed. The API key never appears in
 // VM user_data, normalized readbacks, errors, or inference requests.
 export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl=fetch,now=Date.now}={}){
@@ -38,7 +48,7 @@ export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl
     let response;try{response=await fetchImpl(API_BASE+path,{method,headers:{api_key:key,Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'manual',signal:AbortSignal.timeout(25_000)});}catch{fail('HYPERSTACK_REQUEST_UNCONFIRMED');}
     let bytes=0;
     const stream=captureCreateFailure&&response.body?response.body.pipeThrough(new TransformStream({transform(chunk,controller){bytes=Math.min(RESPONSE_LIMIT+1,bytes+chunk.byteLength);controller.enqueue(chunk);}})):response.body;
-    let data;try{data=await boundedJSON(stream,RESPONSE_LIMIT);}catch{if(captureCreateFailure)throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED','unknown',responseDiagnostics(response.status,null,bytes<=RESPONSE_LIMIT?bytes:null));fail('HYPERSTACK_RESPONSE_INVALID');}
+    let data;try{data=await boundedJSON(stream,RESPONSE_LIMIT);}catch{if(captureCreateFailure)throw createResponseFailure(response.status,null,responseDiagnostics(response.status,null,bytes<=RESPONSE_LIMIT?bytes:null));fail('HYPERSTACK_RESPONSE_INVALID');}
     return {status:response.status,data,...(captureCreateFailure?{diagnostics:responseDiagnostics(response.status,data,bytes<=RESPONSE_LIMIT?bytes:null)}:{})};
   }
   async function read(path){const r=await request(path);if(r.status!==200)fail('HYPERSTACK_REQUEST_UNCONFIRMED');return r.data;}
@@ -160,8 +170,8 @@ export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl
       // Caller MUST first durably consume its nonce/createAttempted flag and
       // arm both guards. This local set adds protection, not restart durability.
       let r;try{r=await request('/core/virtual-machines',{method:'POST',captureCreateFailure:true,body:{count:1,environment_name:t.environmentName,flavor_name:t.flavorName,image_id:t.imageId,key_name:t.keyName,name:q.name,user_data:userData,assign_floating_ip:true,enable_port_randomization:false,create_bootable_volume:false,security_rules:[],...(q.ownershipPolicy===NONCE_NAME_OWNERSHIP?{}:{labels:[`unjailed:${q.nonce}`]})}});}catch(error){if(error instanceof CreateError)throw error;throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED');}
-      if(r.status===400&&r.data?.status===false&&r.data.error_reason==='compatibility_blocked'&&r.data.compatibility_status==='BLOCKED')throw new CreateError('HYPERSTACK_IMAGE_INCOMPATIBLE','definite-no-create',r.diagnostics);
-      if(r.status!==200||r.data?.status!==true||!Array.isArray(r.data.instances)||r.data.instances.length!==1)throw new CreateError('HYPERSTACK_CREATE_UNCONFIRMED','unknown',r.diagnostics);
+      if(r.status===400&&r.data?.status===false&&r.data.error_reason==='compatibility_blocked'&&r.data.compatibility_status==='BLOCKED'&&!createResourceEvidence(r.data))throw new CreateError('HYPERSTACK_IMAGE_INCOMPATIBLE','definite-no-create',r.diagnostics);
+      if(r.status!==200||r.data?.status!==true||!Array.isArray(r.data.instances)||r.data.instances.length!==1)throw createResponseFailure(r.status,r.data,r.diagnostics);
       let p;try{p=normalizeVM(r.data.instances[0]);if(!matchesReservation(p,q))fail('HYPERSTACK_CREATE_IDENTITY_MISMATCH');}catch{throw new CreateError('HYPERSTACK_CREATE_READBACK_UNCONFIRMED','unknown',r.diagnostics);}
       return p;
     },
