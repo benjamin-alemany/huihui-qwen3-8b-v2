@@ -1,0 +1,64 @@
+{
+  "image": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:436f9088dac4df3b77e18c3dbf284bf736be85628385e187d2c41d28b43c37fa",
+  "digest": "sha256:436f9088dac4df3b77e18c3dbf284bf736be85628385e187d2c41d28b43c37fa",
+  "source_sha": "bd93a32be80aa4abef091006f5014d687b85c379",
+  "runtime_source_sha": "e62ee0770dcdff8088c99fb835e2bee06b27d38c",
+  "run_id": 42741842571,
+  "directory_only_correction": true,
+  "all_parent_layers_identical": true,
+  "directory_modes": {
+    "opt": {
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0
+    },
+    "opt/qwen": {
+      "mode": "0o555",
+      "uid": 0,
+      "gid": 0
+    },
+    "opt/qwen/model-notices": {
+      "mode": "0o555",
+      "uid": 0,
+      "gid": 0
+    },
+    "opt/qwen-model": {
+      "mode": "0o555",
+      "uid": 0,
+      "gid": 0
+    }
+  },
+  "entrypoint_verified": true,
+  "command_empty": true,
+  "nonempty_credential_like_environment_names": [],
+  "layer_count": 50,
+  "compressed_bytes": 22104667316,
+  "verification_pending": false,
+  "verification_conclusion": "success",
+  "verification_url": "https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42741842571",
+  "model": "huihui-ai/Huihui-Qwen3-8B-abliterated-v2",
+  "model_revision": "7d89db76029281fd8f3e6698a8e30738608105a9",
+  "model_cache_files": 14,
+  "model_cache_bytes": 16397433656,
+  "manifest_sha256": "17c0a9292f743381b4c6ca540aaa127a940effded33cb2021675f9ab66d56ad8",
+  "verified_with_uid": 10001,
+  "root_owned_cache_verified": true,
+  "cache_hashes_verified": true,
+  "runtime_imports_verified": true,
+  "weights_downloaded_on_github": true,
+  "weights_downloaded_locally": false,
+  "gpu_started": true,
+  "agent_tools_enabled": false,
+  "production_deployed": false,
+  "network_release_pin_approved": false,
+  "scope": "CPU artifact verification passed. One separately approved Runpod validation failed at CUDA initialization before weights loaded; network release approval remains false.",
+  "runtime_validation": {
+    "status": "FAILED_CUDA_INITIALIZATION",
+    "cuda_error": 304,
+    "model_loaded": false,
+    "chat_passed": false,
+    "pod_deleted_verified": true,
+    "security_policy_relaxed": false,
+    "new_paid_attempt_authorized": false
+  }
+}

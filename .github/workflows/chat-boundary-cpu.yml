@@ -1,6 +1,17 @@
 name: Chat credential boundary CPU verification
 on:
   workflow_dispatch:
+    inputs:
+      vm_boundary_only:
+        description: Run only the dummy VM bootstrap and external host-boundary CPU fixtures
+        required: false
+        type: boolean
+        default: false
+      cuda_diagnostic_only:
+        description: Run only the model-free CUDA observer CPU fixture (no serving image pull)
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -9,7 +20,7 @@ concurrency:
 jobs:
   verify:
     # Standard public runner only. No packages, artifacts, cache or cloud keys.
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -19,9 +30,86 @@ jobs:
       - name: Portable policy and existing boot regression checks
         run: |
           python3 -B chat/test_boot.py
+          python3 -B chat/test_offline_cache.py
+          python3 -B chat/test_network_boundary.py
           python3 -B chat/test_credential_boundary.py
+          python3 -B chat/test_chat_server.py
+          python3 -B chat/test_cache_materialize.py
           python3 -B -m unittest discover -s tests -v
+      - name: Verify inherited Linux network boundary with dummy loopback data
+        run: timeout 35s python3 -I -B chat/network_probe.py
       - name: Build small CPU fixture without model or CUDA
         run: docker build --platform linux/amd64 -t qwen-chat-boundary-cpu:ci -f chat/boundary_tests/Dockerfile chat
       - name: Verify actual Linux protections with dummy data and network disabled
         run: docker run --rm --name qwen-chat-boundary-cpu --platform linux/amd64 --network none --cpus 1 --memory 256m --pids-limit 64 qwen-chat-boundary-cpu:ci
+  transport:
+    # Disposable CPU analogue, NOT serving-image/CUDA/Runpod acceptance.
+    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Install hash-pinned CPU wheels without inherited credentials or hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" = 3.12
+          python3 -m venv "$RUNNER_TEMP/qwen-transport-venv"
+          mkdir "$RUNNER_TEMP/qwen-transport-home"
+          env -i PATH="$RUNNER_TEMP/qwen-transport-venv/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP/qwen-transport-home" \
+            "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -m pip --isolated install \
+            --disable-pip-version-check --no-cache-dir --no-compile --no-deps --only-binary=:all: \
+            --require-hashes --retries 0 --timeout 30 -r chat/boundary_tests/transport-requirements.txt
+      - name: Verify single-rank CPU transport under unchanged outbound and IPC denial
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            -o "$RUNNER_TEMP/loopback_ifaddrs.so" chat/loopback_ifaddrs.c
+          env -i PATH="$RUNNER_TEMP/qwen-transport-venv/bin:/usr/bin:/bin" HOME="$RUNNER_TEMP/qwen-transport-home" \
+            LD_PRELOAD="$RUNNER_TEMP/loopback_ifaddrs.so" GLOO_SOCKET_IFNAME=lo \
+            timeout 50s "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -B chat/boundary_tests/transport_probe.py
+  serving-libraries:
+    # Existing public image only; never build/publish serving images or load weights.
+    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Require enough free ephemeral disk on a standard runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          python3 -c 'import shutil; assert shutil.disk_usage("/").free > 45*1024**3, "Stop: standard runner has insufficient free disk"'
+      - name: Check existing serving libraries with no network GPU credentials or model
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c'
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            -o chat/loopback_ifaddrs.so chat/loopback_ifaddrs.c
+          docker pull "$image"
+          docker image inspect --format 'Existing base uncompressed bytes: {{.Size}}' "$image"
+          docker run --rm --network none --user 10001:10001 --entrypoint python3 "$image" -I -c '
+          import importlib.metadata as m,json
+          names=["vllm","torch","transformers","safetensors","tokenizers","huggingface-hub","Jinja2","pyzmq","numpy","fastapi","starlette","uvicorn","pydantic","requests","urllib3","aiohttp"]
+          print("SCOPED_DEPENDENCIES "+json.dumps({n:m.version(n) for n in names},sort_keys=True))
+          '
+          docker run --rm --network none --cpus 2 --memory 6g --pids-limit 128 \
+            --cap-drop ALL --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/chat,target=/candidate,readonly" \
+            --entrypoint /bin/bash "$image" -ceu '
+              cp -R /candidate/. /opt/qwen/
+              chmod 0444 /opt/qwen/loopback_ifaddrs.so
+              exec python3 -I -B /opt/qwen/boundary_tests/runtime_probe_boot.py
+            '
+  cuda-diagnostic:
+    if: inputs.cuda_diagnostic_only && !inputs.vm_boundary_only
+    uses: ./.github/workflows/cuda-diagnostic-cpu.yml
+
+  vm-boundary:
+    if: inputs.vm_boundary_only
+    uses: ./.github/workflows/vm-boundary-cpu.yml

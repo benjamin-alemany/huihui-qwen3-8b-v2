@@ -1,0 +1,14 @@
+[Unit]
+Description=Start one immutable sealed inference session after exact driver bootstrap
+Requires=unjailed-bootstrap.service
+After=unjailed-bootstrap.service network-online.target
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B /opt/unjailed/vm/run.py --execute
+UMask=0077
+Restart=no
+RemainAfterExit=true
+TimeoutStartSec=3500
+[Install]
+WantedBy=multi-user.target

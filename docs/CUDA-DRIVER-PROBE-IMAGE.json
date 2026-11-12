@@ -1,0 +1,17 @@
+{
+  "digest": "sha256:6f652142fdbe0f7b824865781a35858dbf2a49d802d87ce9b469b8763afa09c3",
+  "uncompressed_bytes": 447812405,
+  "source_hashes_verified": true,
+  "observer_sha256": "9411c2881ec9d75ae1d47166896c83f34ca40ad0bcad173c89703827b21b0281",
+  "cpu_boot_verified": true,
+  "model_loaded": false,
+  "paid_resource_started": false,
+  "runpod_cuda_validated": false,
+  "agent_tools_enabled": false,
+  "source_commit": "daf8120d6c156df9840741ddead87413be68eaf9",
+  "workflow_run": 42892177648,
+  "workflow_url": "https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42892177648",
+  "compressed_bytes": 152342563,
+  "scope": "driver-only; different base/Python from serving image; not CUDA/vLLM/model acceptance",
+  "network_policy_changed": false
+}

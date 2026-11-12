@@ -1,0 +1,12 @@
+# Prepared VM-only overlay; no model downloads or changed weight layers.
+FROM ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:436f9088dac4df3b77e18c3dbf284bf736be85628385e187d2c41d28b43c37fa
+USER root
+COPY --chown=0:0 --chmod=0444 chat/credential_boot.py chat/credential_boundary.py chat/offline_cache.py chat/chat_server.py start.py /opt/qwen/
+COPY --chown=0:0 --chmod=0444 vm/boot.py /opt/qwen/inference_only.py
+COPY --chown=0:0 --chmod=0444 vm/model_boot.py /opt/qwen/model_boot.py
+COPY --chown=0:0 --chmod=0444 vm/preflight.py /opt/qwen/preflight.py
+COPY --chown=0:0 --chmod=0444 vm/egress_probe.py /opt/qwen/egress_probe.py
+COPY --chown=0:0 --chmod=0444 vm/inference_policy.py vm/image_setup.py vm/attestation.py vm/host_policy.py /opt/qwen/
+RUN python3 -I -S -B /opt/qwen/image_setup.py
+ENTRYPOINT ["python3","-I","-S","-B","/opt/qwen/credential_boot.py"]
+CMD []

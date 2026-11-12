@@ -1,0 +1,37 @@
+name: CUDA diagnostic observer CPU verification
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Portable refusal gates and serving regression tests
+        run: |
+          python3 -I -B chat/test_cuda_diagnostic.py
+          python3 -I -B chat/test_network_boundary.py
+          python3 -I -B chat/test_chat_server.py
+      - name: Compile only the observer and fake CUDA fixture
+        run: |
+          mkdir "$RUNNER_TEMP/cuda-audit"
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            chat/loopback_ifaddrs.c chat/cuda_syscall_audit.c -o "$RUNNER_TEMP/cuda-audit/observer.so"
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            chat/boundary_tests/fake_cuda.c -o "$RUNNER_TEMP/cuda-audit/libcuda.so.1"
+      - name: Verify real kernel denials and numeric-only bounded observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- env -i PATH=/usr/bin:/bin \
+            LD_PRELOAD="$RUNNER_TEMP/cuda-audit/observer.so" \
+            LD_LIBRARY_PATH="$RUNNER_TEMP/cuda-audit" \
+            timeout 25s python3 -I -B chat/boundary_tests/cuda_audit_probe.py \
+            > "$RUNNER_TEMP/cuda-audit/stdout" 2> "$RUNNER_TEMP/cuda-audit/stderr"
+          python3 chat/boundary_tests/check_cuda_audit.py "$RUNNER_TEMP/cuda-audit"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Resume approved immutable inference bootstrap after driver reboot
+After=network-online.target
+Wants=network-online.target
+Before=unjailed-tunnel.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I -B /opt/unjailed/vm/bootstrap.py --execute
+User=root
+UMask=0077
+PrivateTmp=true
+NoNewPrivileges=true
+Restart=no
+TimeoutStartSec=1800
+[Install]
+WantedBy=multi-user.target
