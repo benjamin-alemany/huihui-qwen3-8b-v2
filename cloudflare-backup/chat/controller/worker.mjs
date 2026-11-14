@@ -2,6 +2,7 @@ import {parseOperatorBudget} from './budget-reconcile.mjs';
 import {DurableObject,WorkerEntrypoint} from 'cloudflare:workers';
 import {collectGuardReadiness,safeTailFailure,cloudflareTailClient} from './tails.mjs';
 import {SessionEngine} from './engine.mjs';
+import {parseTestCampaign} from './campaign.mjs';
 import {runpodClient} from './runpod.mjs';
 import {SessionError,terminal,IMAGE,parseOriginalAcceptance} from './session-policy.mjs';
 import {networkReleaseReady} from './network-release.mjs';
@@ -39,9 +40,11 @@ export class ChatSessionController extends DurableObject {
     const connected=selected?selected.connected:!!this.env.RUNPOD_API_KEY,provider=selected?.provider??(connected?runpodClient(this.env.RUNPOD_API_KEY):null);
     const now=()=>Date.now(),validationMode=this.env.VALIDATION_MODE==='true';let operatorBudget;try{operatorBudget=parseOperatorBudget(this.env.OPERATOR_BUDGET_RECONCILIATION);}catch{operatorBudget={invalid:true};}
     let originalAcceptance;try{originalAcceptance=parseOriginalAcceptance(this.env.ORIGINAL_ACCEPTANCE_JSON)??undefined;}catch{originalAcceptance=null;}
+    let campaign;try{campaign=parseTestCampaign(this.env.TEST_CAMPAIGN_JSON);}catch{campaign={invalid:true};}
     return new SessionEngine(this.ctx.storage,{now,id:()=>crypto.randomUUID(),hex:length=>Array.from(crypto.getRandomValues(new Uint8Array(length/2)),b=>b.toString(16).padStart(2,'0')).join(''),
       operatorBudget:selected?.operatorBudget??operatorBudget,validationMode,enabled:!operatorRecoveryActive(this.env)&&(selected?selected.enabled:this.env.START_ENABLED==='true'&&networkReleaseReady(IMAGE)&&(!validationMode||operatorBudget!==null&&!operatorBudget.invalid)),approval:this.env.APPROVED_ACCEPTANCE_ID??'',connected,key:selected?selected.key:this.env.RUNPOD_API_KEY,
       originalAcceptance:selected?selected.originalAcceptance:originalAcceptance,
+      campaign,campaignRequired:validationMode&&selected?.lifecycle?.provider==='hyperstack',
       ...(selected?{lifecycle:selected.lifecycle}:{}),
       maxHourly:Number(this.env.MAX_SESSION_HOURLY_USD??'.60'),maxUSD:Number(this.env.MAX_ACCEPTANCE_USD??'.25'),
       provider,guards:[this.env.PRIMARY_GUARD,this.env.BACKUP_GUARD],

@@ -8,6 +8,7 @@ import {hyperstackLifecycle} from '../../hyperstack/controller-policy.mjs';
 import {hyperstackClient} from '../../hyperstack/client.mjs';
 import {normalizeVM,validateReservation} from '../../hyperstack/policy.mjs';
 import {verifyOperatorAbsence} from '../../hyperstack/operator-absence.mjs';
+import {parseTestCampaign,campaignBinding,campaignStart,campaignBeforeCreate} from '../campaign.mjs';
 it('has no public admin/start/inference endpoint',async()=>{
   for(const path of ['/','/api/start','/api/status','/api/exec','/api/check'])expect((await exports.default.fetch(new Request('https://dummy.test'+path))).status).toBe(404);
 });
@@ -16,6 +17,22 @@ it('budget and spent approvals survive real object eviction; no key means paid S
  const result=await a.start({quoteId:quote.id,maximumUSD:quote.maximumUSD});expect(result.error).toBe('LAUNCH_LOCKED');
  await runInDurableObject(a,instance=>instance.engine().tx(r=>{r.ledger.spent+=100;r.ledger.usedApprovals.push('already-used');}));
  const before=await a.status();await evictDurableObject(a);const after=await env.SESSION_CONTROLLER.getByName(name).status();expect(after.budget).toEqual(before.budget);expect(after.testBudget.originalAcceptance.spentUSD).toBe(.4);expect(after.launchEnabled).toBe(false);
+});
+it('campaign POST/candidate counters and immutable parent policy survive SQLite eviction without resetting old accounting',async()=>{
+ const name=crypto.randomUUID(),stub=env.SESSION_CONTROLLER.getByName(name),now=Date.now(),policy=parseTestCampaign(JSON.stringify({version:1,id:crypto.randomUUID(),validFrom:now,expiresAt:now+86400000,maxStarts:20,maxPosts:5,maxAllocations:3,capUSD:5}));
+ const configure=instance=>{instance.env={...instance.env,VALIDATION_MODE:'true',TEST_CAMPAIGN_JSON:JSON.stringify(policy)};return instance.engine();};
+ const before=await runInDurableObject(stub,async instance=>{
+  const engine=configure(instance);return engine.tx(r=>{
+   r.ledger.cap=5*SCALE;r.ledger.usedApprovals.push('DUMMY_HISTORICAL_CHILD');
+   const target={region:'CANADA-1',flavorName:'n3-RTX-A6000x1',maximumHourlyUSD:.507},s={id:crypto.randomUUID(),quoteId:'DUMMY_CAMPAIGN_QUOTE',approval:'DUMMY_CAMPAIGN_CHILD',budgetKind:'test',phase:'preflight',createAttempted:false,stopRequested:false,quote:{provider:'hyperstack',gpu:'RTX-A6000',minutes:30,totalHourlyUSD:.50672043,maximumUSD:.3,campaignBinding:campaignBinding(policy)}};
+   campaignStart(r,s,{policy,required:true,target,now});campaignBeforeCreate(r,s,{policy,required:true,target,now});s.createAttempted=true;s.phase='reconciling';r.session=s;r.ledger.held=.3*SCALE;r.ledger.usedApprovals.push(s.approval);return structuredClone(r.ledger);
+  });
+ });
+ await evictDurableObject(stub);const restored=env.SESSION_CONTROLLER.getByName(name);
+ const result=await runInDurableObject(restored,async instance=>{const engine=configure(instance),status=await engine.status();return {status,ledger:(await engine.read()).ledger};});
+ expect(result.status.campaign).toMatchObject({startsUsed:1,postsUsed:1,allocationsUsed:0,candidates:1,code:'CAMPAIGN_UNRESOLVED_ATTEMPT'});expect(result.status.launchEnabled).toBe(false);expect(result.ledger).toEqual(before);
+ const changed=await runInDurableObject(restored,async instance=>{instance.env={...instance.env,TEST_CAMPAIGN_JSON:JSON.stringify({...policy,maxPosts:4})};return instance.engine().status();});expect(changed.campaign.code).toBe('CAMPAIGN_CHANGED');expect(changed.testBudget.reservedUSD).toBe(.3);
+ const original=await runInDurableObject(restored,async instance=>(await configure(instance).read()).testCampaigns[policy.id]);expect(original.policy.maxPosts).toBe(5);expect(original.postsUsed).toBe(1);expect(original.candidates).toBe(1);
 });
 it('persists one pending free check across handles and refuses duplicate scheduling',async()=>{
   const name=crypto.randomUUID(),a=env.SESSION_CONTROLLER.getByName(name);

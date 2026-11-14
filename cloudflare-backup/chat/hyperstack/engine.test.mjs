@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import release from '../../../release/manifest.json' with {type:'json'};
 import {SessionEngine} from '../controller/engine.mjs';
+import {parseTestCampaign} from '../controller/campaign.mjs';
+import {SCALE} from '../controller/session-policy.mjs';
 import {hyperstackLifecycle} from './controller-policy.mjs';
 import {CreateError} from './client.mjs';
 import {validateCatalog,normalizeVM,absenceReceipt} from './policy.mjs';
@@ -32,6 +34,30 @@ function harness(){
  const engine=()=>new SessionEngine(store,deps);
  return {store,provider,deps,flags,rows,calls,guards,engine,get now(){return now;},advance:ms=>{now+=ms;},get creates(){return calls.filter(c=>c[0]==='create').length;},async grant(){return engine().grant({grantId:'00000000-0000-4000-8000-000000000001',amountUSD:2});},async start(minutes){const q=await engine().quote(minutes===undefined?undefined:{minutes});await engine().start({quoteId:q.id,maximumUSD:q.maximumUSD});return q;},async ready(minutes){await this.start(minutes);await engine().tick();await engine().tick();await engine().tick();return (await engine().status()).session;}};
 }
+async function campaignHarness(patch={}){
+ const h=harness(),target={...TARGET,maximumHourlyUSD:.507};
+ Object.assign(h.deps,{validationMode:true,campaignRequired:true,campaign:parseTestCampaign(JSON.stringify({version:1,id:'00000000-0000-4000-8000-000000000099',validFrom:NOW,expiresAt:NOW+86400000,maxStarts:20,maxPosts:5,maxAllocations:3,capUSD:5,...patch})),maxHourly:.507,maxUSD:.35,lifecycle:hyperstackLifecycle({target,release:pinned()})});
+ h.deps.catalog=async()=>validateCatalog(catalogRaw(),target,h.now);
+ await h.engine().tx(r=>{r.ledger.cap=5*SCALE;});return h;
+}
+test('durable campaign survives new engine handles and child approvals without resetting counters or prior accounting',async()=>{
+ const h=await campaignHarness(),before=structuredClone((await h.engine().read()).ledger);h.flags.create='definite';
+ for(let n=0;n<2;n++){
+  h.deps.approval='DUMMY_CHILD_'+n;const q=await h.start(30);await h.engine().start({quoteId:q.id,maximumUSD:q.maximumUSD});assert.equal((await h.engine().status()).campaign.startsUsed,n+1);
+  await h.engine().tick();await h.engine().tick();const status=await h.engine().status();assert.equal(status.session.phase,'failed');assert.equal(status.campaign.postsUsed,n+1);assert.equal(status.campaign.candidates,0);assert.equal(status.testBudget.reservedUSD,0);assert.deepEqual(h.guards,[null,null]);
+ }
+ const r=await h.engine().read();assert.equal(r.ledger.spent,before.spent);assert.equal(r.ledger.cap,before.cap);assert.equal(r.ledger.usedApprovals.length,before.usedApprovals.length+2);assert.equal(h.creates,2);assert.equal((await h.engine().status()).ordinaryBudget.capUSD,0);
+});
+test('campaign expiry during arming consumes no POST barrier and cleans guards without changing its immutable window',async()=>{
+ const h=await campaignHarness({expiresAt:NOW+500});await h.start(30);await h.engine().tick();h.flags.armingDelay=1000;await h.engine().tick();const status=await h.engine().status();assert.equal(h.creates,0);assert.equal(status.session.phase,'failed');assert.equal(status.session.code,'CAMPAIGN_EXPIRED');assert.equal(status.campaign.postsUsed,0);assert.equal(status.campaign.startsUsed,1);assert.equal(status.testBudget.reservedUSD,0);assert.deepEqual(h.guards,[null,null]);
+});
+test('unknown campaign creation freezes its candidate, hold and child approval across handles and parent changes',async()=>{
+ const h=await campaignHarness();h.flags.create='unknown';await h.start(30);await h.engine().tick();await h.engine().tick();let status=await h.engine().status();const held=status.testBudget.reservedUSD;assert(held>0);assert.equal(status.campaign.postsUsed,1);assert.equal(status.campaign.candidates,1);
+ h.advance(6*60000);await h.engine().tick();h.deps.approval='DUMMY_OTHER_CHILD';h.deps.campaign={...h.deps.campaign,id:'00000000-0000-4000-8000-000000000098'};status=await h.engine().status();assert.equal(status.launchEnabled,false);assert.equal(status.campaign.code,'CAMPAIGN_UNRESOLVED_ATTEMPT');assert.equal(status.testBudget.reservedUSD,held);assert(h.guards.every(Boolean));assert.equal(h.creates,1);
+});
+test('one observed campaign VM is counted once across polls and remains consumed after verified teardown',async()=>{
+ const h=await campaignHarness();const s=await h.ready(30);await h.engine().tick();assert.equal((await h.engine().status()).campaign.allocationsUsed,1);await h.engine().stop({sessionId:s.id});await h.engine().tick();const status=await h.engine().status();assert.equal(status.session.phase,'stopped');assert.equal(status.campaign.allocationsUsed,1);assert.equal(status.campaign.candidates,0);assert.equal(status.campaign.postsUsed,1);assert.equal(status.testBudget.reservedUSD,0);assert.equal(h.rows.length,0);
+});
 test('otherwise-pinned candidate with a missing serving artifact cannot choose the new provider',()=>{
  const valid=pinned();assert.equal(hyperstackLifecycle({target:TARGET,release:valid}).provider,'hyperstack');
  const missing=structuredClone(valid);missing.artifact.servingImage=null;

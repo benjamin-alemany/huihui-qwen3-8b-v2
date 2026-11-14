@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import manifest from '../../../release/manifest.json' with {type:'json'};
-import {hyperstackControllerFactory,boundBootstrapFor,boundHealthVerifier,verifyHostGatewayReceipt} from './controller-factory.mjs';
+import {hyperstackControllerFactory,boundBootstrapFor,boundCampaignCreateGate,boundHealthVerifier,verifyHostGatewayReceipt} from './controller-factory.mjs';
+import {parseTestCampaign,reconcileCampaign,campaignBinding,campaignStart,campaignBeforeCreate} from '../controller/campaign.mjs';
+import {hyperstackClient} from './client.mjs';
+import {SCALE} from '../controller/session-policy.mjs';
 import {hyperstackLifecycle} from './controller-policy.mjs';
 import {normalizeVM} from './policy.mjs';
 import {TARGET,NOW,Store,rawVM} from './fixtures.mjs';
@@ -20,6 +23,26 @@ test('factory construction is side-effect free and flags/callbacks cannot replac
  const {store,r}=prepared();let calls=0;
  const f=hyperstackControllerFactory({env:{...environment(),APPROVED_ACCEPTANCE_RELEASE:JSON.stringify({releaseId:r.id})},storage:store,release:r,bundle:{},renderBootstrap:async()=>'',bootstrapReady:()=>true,runtimeOrchestratorReady:()=>true,fetchImpl:async()=>{calls++;throw Error();},now:()=>NOW});
  assert.equal(calls,0);assert.equal(f.connected,true);assert.equal(f.enabled,false);assert.equal(f.lifecycle.provider,'hyperstack');assert.equal(f.readiness.sourceApproved,false);assert(f.readiness.blockers.includes('HYPERSTACK_ACCEPTANCE_RELEASE_UNAPPROVED'));assert(!JSON.stringify(f.readiness).includes(PROVIDER_KEY));assert(!JSON.stringify(f.readiness).includes(tunnel.TunnelSecret));
+});
+test('one reviewed source pre-stages both acceptance targets while binding the selected target exactly',()=>{
+ const before=structuredClone(manifest),bindings=[];
+ for(const [flavorName,maximumHourlyUSD,gpuHourlyUSD]of [['n3-RTX-A6000x1',.507,.5],['n3-A100x1',1.36,1.35]]){
+  const target={...TARGET,imageId:574,flavorName,maximumHourlyUSD},env={...environment(),HYPERSTACK_TARGET_JSON:JSON.stringify(target)},seen=[];
+  const factory=hyperstackControllerFactory({env,storage:new Store(),bundle:{},renderBootstrap:async()=>'',bootstrapReady:r=>{seen.push(r.hosting.flavor);return true;},runtimeOrchestratorReady:r=>{seen.push(r.hosting.flavor);return true;},fetchImpl:async()=>{throw Error('Factory must not perform I/O');},now:()=>NOW});
+  assert.equal(factory.enabled,true);assert.equal(factory.readiness.sourceApproved,true);assert.deepEqual(factory.readiness.blockers,[]);assert.deepEqual(seen,[flavorName,flavorName]);
+  const l=factory.lifecycle,reservation=l.reservation(NOW,'a'.repeat(32),30),quote=l.makeQuote({provider:'hyperstack',gpu:flavorName==='n3-A100x1'?'A100-80G-PCIe':'RTX-A6000',gpuHourly:gpuHourlyUSD,totalHourly:gpuHourlyUSD+.00672043,availability:'AVAILABLE'},NOW,'dummy-quote',30);
+  assert.equal(reservation.target.flavorName,flavorName);assert.equal(reservation.target.maximumHourlyUSD,maximumHourlyUSD);assert.deepEqual(JSON.parse(l.binding).target,reservation.target);assert.equal(quote.gpuHourlyUSD,gpuHourlyUSD);assert.equal(reservation.image,manifest.artifact.servingImage);bindings.push(l.binding);
+ }
+ assert.notEqual(bindings[0],bindings[1]);assert.deepEqual(manifest,before);
+});
+test('acceptance target selection cannot approve other hardware, images, regions, rates or production',()=>{
+ const target={...TARGET,imageId:574,flavorName:'n3-A100x1',maximumHourlyUSD:1.36};
+ for(const patch of [{flavorName:'n3-A100x1-spot'},{flavorName:'n3-A100x2'},{flavorName:'n3-L40x1'},{region:'NORWAY-1'},{imageId:575},{maximumHourlyUSD:1.360001},{flavorName:'n3-RTX-A6000x1',maximumHourlyUSD:.6}]){
+  const f=hyperstackControllerFactory({env:{...environment(),HYPERSTACK_TARGET_JSON:JSON.stringify({...target,...patch})},storage:new Store(),renderBootstrap:async()=>'',bootstrapReady:()=>true,runtimeOrchestratorReady:()=>true});
+  assert.equal(f.enabled,false);assert(f.readiness.blockers.length>0);
+ }
+ const production=hyperstackControllerFactory({env:{...environment(),VALIDATION_MODE:'false',HYPERSTACK_TARGET_JSON:JSON.stringify(target)},release:{...structuredClone(manifest),status:'verified'},storage:new Store(),renderBootstrap:async()=>'',bootstrapReady:()=>true,runtimeOrchestratorReady:()=>true});
+ assert.equal(production.enabled,false);assert.equal(production.readiness.sourceApproved,false);assert(production.readiness.blockers.includes('HYPERSTACK_PRODUCTION_RELEASE_UNAPPROVED'));
 });
 test('malformed target, key and release never fall back to Runpod or send any request',async()=>{
  const {store,r}=prepared();let calls=0;const fetchImpl=async()=>{calls++;throw Error('No HTTP');};
@@ -53,6 +76,18 @@ test('changed nonce, phase, credential equality, cancellation or expiry refuses 
   const boot=boundBootstrapFor({storage:store,target:TARGET,release:r,hostTunnelCredential:tunnel,now:()=>NOW,renderBootstrap:async()=>{calls++;return 'dummy';}});await assert.rejects(boot(q));assert.equal(calls,0);
  }
  const {store,r,q,s}=prepared();const boot=boundBootstrapFor({storage:store,target:TARGET,release:r,hostTunnelCredential:tunnel,now:()=>NOW,renderBootstrap:async()=>{await store.put('session-ledger-v1',{session:{...s,stopRequested:true}});return 'dummy';}});await assert.rejects(boot(q));
+});
+test('post-bootstrap campaign gate binds persisted authority and refuses expiry or Stop before the sole HTTP POST',async()=>{
+ for(const mode of ['valid','expiry','stop','child']){
+  const {store,r,s}=prepared(),target={...TARGET,maximumHourlyUSD:.507},lifecycle=hyperstackLifecycle({target,release:r}),q=lifecycle.reservation(NOW,'a'.repeat(32),30);let clock=NOW,posts=0;
+  const campaign=parseTestCampaign(JSON.stringify({version:1,id:'00000000-0000-4000-8000-000000000099',validFrom:NOW,expiresAt:NOW+1000,maxStarts:20,maxPosts:5,maxAllocations:3,capUSD:5}));
+  Object.assign(s,{reservation:q,budgetKind:'test',quoteId:'DUMMY_QUOTE',approval:'DUMMY_CHILD',createAttempted:false,phase:'preflight',quote:{provider:'hyperstack',gpu:'RTX-A6000',minutes:30,totalHourlyUSD:.50672043,maximumUSD:.3,campaignBinding:campaignBinding(campaign)}});
+  const record={session:s,ledger:{cap:5*SCALE,spent:0,held:0}};record.campaignReconciliation=reconcileCampaign(record,campaign,true);campaignStart(record,s,{policy:campaign,required:true,target,now:NOW});campaignBeforeCreate(record,s,{policy:campaign,required:true,target,now:NOW});s.createAttempted=true;s.phase='reconciling';await store.put('session-ledger-v1',record);
+  const beforeCreate=boundCampaignCreateGate({storage:store,target,release:r,campaign,required:true,childApprovalId:mode==='child'?'DUMMY_CHANGED':s.approval,now:()=>clock});
+  const c=hyperstackClient(PROVIDER_KEY,{target,now:()=>clock,beforeCreate,bootstrapFor:async()=>{if(mode==='expiry')clock+=1000;if(mode==='stop'){record.session.stopRequested=true;await store.put('session-ledger-v1',record);}return '#cloud-config';},fetchImpl:async()=>{posts++;return Response.json({status:true,instances:[rawVM({labels:[]})]});}});
+  if(mode==='valid'){assert.equal((await c.create(q)).id,'44');assert.equal(posts,1);}else{await assert.rejects(c.create(q),e=>e.outcome==='definite-no-create');assert.equal(posts,0);}
+  const saved=await store.get('session-ledger-v1');assert.equal(saved.testCampaigns[campaign.id].postsUsed,1);assert.equal(saved.testCampaigns[campaign.id].candidates,1);assert.equal(saved.session.createAttempted,true);assert(!JSON.stringify(saved.testCampaigns).includes(PROVIDER_KEY));
+ }
 });
 test('unresolved global cleanup evidence refuses bootstrap even when the current session stop flag is false',async()=>{
  const {store,r,q,s}=prepared();await store.put('session-ledger-v1',{session:s,cleanupIncidents:[{sessionId:'DUMMY_OLD_SESSION',volumeIds:['77'],resolved:false}]});let calls=0;

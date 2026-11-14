@@ -41,7 +41,7 @@ function createResponseFailure(status,data,diagnostics){
 }
 // No generic request/URL passthrough is exposed. The API key never appears in
 // VM user_data, normalized readbacks, errors, or inference requests.
-export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl=fetch,now=Date.now}={}){
+export function hyperstackClient(key,{target,bootstrapFor,beforeCreate,verifyHealth,fetchImpl=fetch,now=Date.now}={}){
   if(typeof key!=='string'||key.length<16||/[\r\n]/.test(key))fail('HYPERSTACK_NOT_CONFIGURED');
   const t=validateTarget(target),attempted=new Set();
   async function request(path,{method='GET',body,captureCreateFailure=false}={}){
@@ -165,6 +165,8 @@ export function hyperstackClient(key,{target,bootstrapFor,verifyHealth,fetchImpl
         if(typeof userData!=='string'||!userData.length||Math.ceil(new TextEncoder().encode(userData).length/3)*4>65535||userData.includes(key))fail('HYPERSTACK_BOOTSTRAP_INVALID');
         // Bootstrap generation can await signing/configuration work. Recheck
         // the immutable window after that await, immediately before the POST.
+        if(now()<q.createdNotBefore||now()>q.createdNotAfter||now()>=q.deadline)fail('HYPERSTACK_CREATE_WINDOW_EXPIRED');
+        if(beforeCreate!==undefined){if(typeof beforeCreate!=='function')fail('HYPERSTACK_CREATE_GATE_INVALID');const permit=await beforeCreate(structuredClone(q));if(permit?.expiresAt!==undefined&&(!Number.isSafeInteger(permit.expiresAt)||now()>=permit.expiresAt))fail('HYPERSTACK_CREATE_GATE_EXPIRED');}
         if(now()<q.createdNotBefore||now()>q.createdNotAfter||now()>=q.deadline)fail('HYPERSTACK_CREATE_WINDOW_EXPIRED');
       }catch(e){if(e instanceof CreateError)throw e;throw new CreateError('HYPERSTACK_CREATE_PREFLIGHT_REJECTED','definite-no-create');}
       // Caller MUST first durably consume its nonce/createAttempted flag and

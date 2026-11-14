@@ -1,4 +1,4 @@
-# Hyperstack chat acceptance — one allocation, approval required
+# Hyperstack chat acceptance — bounded campaign, approval required
 
 This is the current public acceptance runbook. It authorizes no deployment,
 funding, VM or retry. Use the reviewed release and private operational plan with
@@ -9,14 +9,45 @@ its approval cannot be reused. See [current status](PROJECT-STATUS.md) and the
 
 ## Before creation
 
-- Use the exact reviewed Hyperstack A100 80 GB target and immutable serving/bootstrap pins.
+- Select only a pre-staged Hyperstack A6000 48 GB or on-demand A100 80 GB target
+  in CANADA-1, Ubuntu image 574, using the unchanged immutable serving/bootstrap
+  pins. The acceptance selection API validates the exact trusted target and its
+  ceiling ($0.507/hour A6000 or $1.36/hour A100); no source edits are needed when
+  stock changes. The quote, consent binding and reservation retain that one
+  selected target. Source selection does not authorize spending or retries.
   Keep ordinary allowance and all agent/terminal tools off. No provider shopping
-  or automatic retry is part of acceptance.
+  is permitted. Retries require the separately approved campaign below.
 - Require the approved quote, preserved historical ledgers, no unresolved resource
-  evidence and exactly one durable create attempt. Unknown outcomes retain holds.
+  evidence and exactly one durably consumed child approval per creation request.
+  Unknown outcomes retain holds and freeze further campaign attempts.
 - Arm both independent destroy guards before create. Both must emit fresh,
   current-version `nonce-name-v2` feature receipts for the exact reservation.
   Matching version IDs alone are insufficient.
+
+## Supervised campaign limits
+
+Prepare and test the configuration before starting the owner-approved campaign
+clock. Hyperstack validation requires trusted `TEST_CAMPAIGN_JSON`: an immutable
+UUID, `validFrom`/`expiresAt` UTC epoch milliseconds no more than 24 hours apart,
+`maxStarts` at most 20, `maxPosts` at most five, `maxAllocations` at most three,
+and the source's five-dollar cumulative ceiling. This is not a new ledger or a
+funding purchase. Preserve prior spending, reserves, approvals and ordinary-use
+allowances. Missing or changed campaign configuration fails closed.
+
+The existing controller Durable Object retains campaign counters across restarts,
+new child approval IDs and either pre-staged target. It consumes each child and
+POST candidate before creation, then checks the campaign again after bootstrap
+rendering immediately before the actual provider POST. Observed allocation slots
+are never refunded. A confirmed rejected request consumes its POST count; only
+its unallocated candidate can be released after independent guard clearance.
+
+A supervised operator may retry only within the owner's current grant, after
+confirmed no-create or verified teardown, released holds and cleared guards.
+Unknown results freeze the campaign. Keep one allocation at a time and reuse a
+healthy allocation for all remaining acceptance checks within its original
+expiry. Cleanup remains available after campaign expiry. Stop on success, budget,
+attempt or validity limits, or a blocker requiring a security/architecture change.
+This runbook itself authorizes no execution, retry, purchase or access change.
 
 ## Time budget and failure meaning
 
@@ -47,7 +78,8 @@ events are stored; the owner API exposes a keyless stage summary, never raw logs
 1. On that allocation, verify packages/driver, private namespaces and mounts,
    process/resource restrictions, credential/socket isolation, adversarial host
    egress, offline cache and native CUDA without loading the model. Failure ends
-   the attempt; do not relax restrictions or launch a replacement.
+   the attempt; do not relax restrictions. A replacement needs the separately
+   approved campaign and verified cleanup, not a repeated create request.
 2. Require fresh independent provider-firewall readback, then the exact host
    model permit. Only a later authenticated model-ready receipt permits Qwen
    chat. The provider key remains outside the VM and agent access remains off.
@@ -65,4 +97,6 @@ events are stored; the owner API exposes a keyless stage summary, never raw logs
 
 Stop promptly on success or failure within the approved operational allowance.
 Cloud timers and cleanup are safeguards, not a guaranteed provider billing cap.
-A fresh approval is required for another allocation or a changed scope/quote.
+Another allocation requires an eligible unused child under the existing explicit
+campaign grant or a new owner approval. Changed scope, an exhausted grant or an
+unknown outcome never creates permission to retry.

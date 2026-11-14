@@ -36,6 +36,14 @@ test('preflight rejects oversized UTF-8 bootstrap, provider key, expired window 
 test('slow bootstrap cannot send a POST after the creation window or deadline expires',async()=>{
  for(const expired of [RESERVATION.createdNotAfter+1,RESERVATION.deadline]){const s=fixture();let clock=NOW;const c=client(s,{now:()=>clock,bootstrapFor:async()=>{clock=expired;return '#cloud-config';}});await assert.rejects(c.create(RESERVATION),e=>e.outcome==='definite-no-create');assert.equal(s.calls.length,0);}
 });
+test('trusted campaign gate runs after bootstrap and rejects expired or stopped authority without a wire POST or nonce retry',async()=>{
+ for(const reason of ['expiry','stop']){
+  const s=fixture();let clock=NOW,rendered=false,checked=0;
+  const c=client(s,{now:()=>clock,bootstrapFor:async()=>{rendered=true;clock=NOW+1000;return '#cloud-config';},beforeCreate:async()=>{checked++;assert.equal(rendered,true);if(reason==='stop')throw Error('DUMMY_PRIVATE_STOP');return {expiresAt:NOW+500};}});
+  await assert.rejects(c.create(RESERVATION),e=>e.outcome==='definite-no-create'&&!JSON.stringify(e).includes('DUMMY_PRIVATE'));assert.equal(checked,1);assert.equal(s.calls.length,0);
+  await assert.rejects(c.create(RESERVATION),e=>e.outcome==='unknown');assert.equal(checked,1);assert.equal(s.calls.length,0);
+ }
+});
 test('lost create retains ambiguity while received API rejection and compatibility rejection are definite',async()=>{
  for(const mode of ['lost','ambiguous','blocked']){const s=fixture({createMode:mode});await assert.rejects(client(s).create(RESERVATION),e=>e.outcome===(mode==='lost'?'unknown':'definite-no-create')&&!e.message.includes('DUMMY_SECRET'));assert.equal(s.calls.filter(x=>x.method==='POST').length,1);if(mode==='lost')assert.equal(s.vms.length,1);}
 });

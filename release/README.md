@@ -4,7 +4,11 @@
 It is a pinned `candidate`, not an accepted production release. The serving image,
 bootstrap package lock, bundle digest, compressed size, source commit, runtime
 orchestrator, GPU flavor and region are pinned. The current candidate selects
-one on-demand A100 80 GB in CANADA-1, retaining the unchanged serving and
+the canonical A100 source flavor and an exact two-target acceptance allowlist:
+A6000 48 GB at a $0.507/hour ceiling or on-demand A100 80 GB at $1.36/hour,
+both in CANADA-1 on Ubuntu image 574. `acceptanceReleaseForTarget` validates
+trusted target configuration before selecting its per-allocation flavor;
+production approval stays separate and absent. Both retain unchanged serving and
 host bootstrap artifacts. The exact image passed free published-artifact checks
 for copied code, offline cache and runtime imports; native acceptance is pending.
 An earlier recorded acceptance stopped at provider reservation identity readback,
@@ -39,8 +43,9 @@ Neither run loaded Qwen or validated the target GPU.
 Subsequent reviewed source fixes refresh owner controller state before quoting,
 preserve safe preflight/cancellation reasons through cleanup, canonicalize the
 exact authenticated Cloudflare logout return, and retain only whitelisted
-create-failure metadata. Latest free coverage passed 334 Node, 26 chat Worker,
-20 controller Durable Object and 20 guard Durable Object checks. Neither these
+create-failure metadata. Current campaign/bootstrap coverage passed 352 Node, 21 controller Durable
+Object and 71 Python/VM checks (one Linux-only skip). Existing unchanged
+chat/guard coverage remains 26/20. Neither these
 CPU checks nor published-artifact verification establish native target-provider
 acceptance or production promotion.
 

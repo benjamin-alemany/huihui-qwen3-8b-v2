@@ -1,5 +1,5 @@
 import manifest from '../../../release/manifest.json' with {type:'json'};
-import {releaseApprovedFor} from '../../../release/approval.mjs';
+import {releaseApprovedFor,acceptanceReleaseForTarget} from '../../../release/approval.mjs';
 import {boundedJSON} from '../policy.mjs';
 import {parseOperatorBudget} from '../controller/budget-reconcile.mjs';
 import {SessionError,parseOriginalAcceptance} from '../controller/session-policy.mjs';
@@ -7,6 +7,7 @@ import {hyperstackClient} from './client.mjs';
 import {hyperstackLifecycle} from './controller-policy.mjs';
 import {runtimeHandshake} from './runtime-handshake.mjs';
 import {collectHostDiagnostics} from './host-diagnostics.mjs';
+import {parseTestCampaign,campaignPostReady} from '../controller/campaign.mjs';
 import {INFERENCE_ORIGIN,creationTimestampIdentity,validateTarget,validateReservation} from './policy.mjs';
 
 const LEDGER='session-ledger-v1',HOST_READY_PATH='/__unjailed/host-ready';
@@ -15,6 +16,9 @@ const inferenceKey=k=>typeof k==='string'&&/^[A-Za-z0-9_-]{43,128}$/.test(k);
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const refused=code=>{throw new SessionError(code,503);};
 const plain=p=>p!==null&&typeof p==='object'&&!Array.isArray(p);
+export function boundCampaignCreateGate({storage,target,release,campaign,required=false,childApprovalId,now=Date.now}){
+ return async q=>{const record=await storage.get(LEDGER);sessionChecked(record,q,{target,release,now:now(),bootstrap:true});return campaignPostReady(record,record.session,{policy:campaign,required,target,now:now(),childApprovalId});};
+}
 function trustedTarget(encoded){
  try{if(typeof encoded!=='string'||encoded.length>4096)throw Error();return validateTarget(JSON.parse(encoded));}catch{refused('HYPERSTACK_TARGET_UNVERIFIED');}
 }
@@ -90,6 +94,10 @@ function unavailableLifecycle(code){
 export function hyperstackControllerFactory({env,storage,release=manifest,bundle=null,renderBootstrap=null,bootstrapReady=()=>false,runtimeOrchestratorReady=()=>false,fetchImpl=fetch,now=Date.now}={}){
  const blockers=[];let target,lifecycle,operatorBudget,hostTunnelCredential,originalAcceptance=null;
  try{target=trustedTarget(env?.HYPERSTACK_TARGET_JSON);}catch{blockers.push('HYPERSTACK_TARGET_UNVERIFIED');}
+ const validationMode=env?.VALIDATION_MODE==='true';let sourceApproved=releaseApprovedFor(validationMode?'acceptance':'production',release);
+ if(validationMode&&sourceApproved&&target){
+  try{release=acceptanceReleaseForTarget({target,release});}catch{sourceApproved=false;blockers.push('HYPERSTACK_ACCEPTANCE_TARGET_UNAPPROVED');}
+ }
  const key=env?.HYPERSTACK_API_KEY,keyConfigured=typeof key==='string'&&key.length>=16&&key.length<=512&&/^[!-~]+$/.test(key);
  if(!keyConfigured)blockers.push('HYPERSTACK_KEY_UNCONFIGURED');
  const guardAccountConfigured=typeof env?.CLOUDFLARE_ACCOUNT_ID==='string'&&/^[a-f0-9]{32}$/.test(env.CLOUDFLARE_ACCOUNT_ID)&&env.CLOUDFLARE_ACCOUNT_ID!=='0'.repeat(32);
@@ -105,14 +113,15 @@ export function hyperstackControllerFactory({env,storage,release=manifest,bundle
  try{runtimePrepared=runtimeOrchestratorReady(release,bundle)===true;}catch{}
  if(!bootstrapPrepared)blockers.push('HYPERSTACK_BOOTSTRAP_UNAVAILABLE');
  if(!runtimePrepared)blockers.push('HYPERSTACK_RUNTIME_ORCHESTRATOR_UNAVAILABLE');
- const validationMode=env?.VALIDATION_MODE==='true',sourceApproved=releaseApprovedFor(validationMode?'acceptance':'production',release);
  if(!sourceApproved)blockers.push(validationMode?'HYPERSTACK_ACCEPTANCE_RELEASE_UNAPPROVED':'HYPERSTACK_PRODUCTION_RELEASE_UNAPPROVED');
  if(validationMode&&(typeof env?.APPROVED_ACCEPTANCE_ID!=='string'||!env.APPROVED_ACCEPTANCE_ID.length))blockers.push('HYPERSTACK_ACCEPTANCE_AUTHORIZATION_MISSING');
  const configReady=!!(target&&lifecycle&&keyConfigured),lockedCode=blockers[0]??'HYPERSTACK_LAUNCH_LOCKED';
  const deny=async()=>refused(lockedCode);
  let provider=Object.freeze({catalog:deny,list:deny,get:deny,create:deny,cleanup:deny,health:async()=>false});
+ let campaign;try{campaign=parseTestCampaign(env?.TEST_CAMPAIGN_JSON);}catch{campaign={invalid:true};}
  if(configReady){provider=hyperstackClient(key,{target,now,fetchImpl,
   bootstrapFor:boundBootstrapFor({storage,target,release,bundle,renderBootstrap:env?.START_ENABLED==='true'&&blockers.length===0?renderBootstrap:null,hostTunnelCredential,now}),
+  beforeCreate:boundCampaignCreateGate({storage,target,release,campaign,required:validationMode,childApprovalId:env?.APPROVED_ACCEPTANCE_ID,now}),
   verifyHealth:runtimePrepared&&sourceApproved?runtimeHandshake({storage,target,release,lifecycle,sessionChecked,verifyHostGatewayReceipt,sealFirewall:(allocation,reservation)=>provider.sealFirewall(allocation,reservation),fetchImpl,now}):async()=>false});
   provider.diagnostics=(allocation,reservation,sessionId)=>collectHostDiagnostics({key,allocation,reservation,sessionId,providerGet:id=>provider.get(id),fetchImpl,now});
  }

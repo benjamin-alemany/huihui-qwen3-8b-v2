@@ -1,6 +1,7 @@
 import {applyOperatorBudget} from './budget-reconcile.mjs';
 import {safePreflightFailure} from './preflight-failure.mjs';
 import {safeCreateDiagnostics} from '../hyperstack/client.mjs';
+import {reconcileCampaign,campaignBinding,campaignView,campaignStart,campaignBeforeCreate,campaignObserve,campaignFinish} from './campaign.mjs';
 import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
 import {SEED,SCALE,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,ordinaryBudgetView,parseGrant,quoteMinutes,sessionMinutes,startupMinutes,receiptFresh,IMAGE,GPU,DISK_GB} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
@@ -30,6 +31,7 @@ export class SessionEngine {
     r.ordinaryLedger??={version:1,cap:0,spent:0,held:0,grantCount:0};
     try{applyOperatorBudget(r,this.d.operatorBudget);r.operatorBudgetReconciliation={ready:true};}
     catch(e){if(!(e instanceof SessionError)||!e.code?.startsWith('OPERATOR_BUDGET_'))throw e;r.operatorBudgetReconciliation={ready:false,code:e.code};}
+    if(this.d.validationMode===true)r.campaignReconciliation=reconcileCampaign(r,this.d.campaign,this.d.campaignRequired===true);
     const result=await fn(r,tx);await tx.put(recordKey,r);if(wakeAt!==undefined)await tx.setAlarm(wakeAt);return result;
   });}
   async read(){return this.tx(r=>structuredClone(r));}
@@ -37,9 +39,9 @@ export class SessionEngine {
   budgetKind(){return this.d.validationMode===true?'test':'ordinary';}
   funding(r,s){return s.budgetKind==='ordinary'?r.ordinaryLedger:r.ledger;}
   canAllocate(r){return !r.cleanupIncidents?.some(i=>!i.resolved)&&terminal(r.session)&&r.ledger.held===0&&r.ordinaryLedger.held===0&&(!r.session?.createAttempted||r.session.phase==='stopped'||r.session.definiteNoCreate===true);}
-  launchEnabled(r){return !!(this.d.enabled&&this.d.connected&&this.canAllocate(r)&&r.operatorBudgetReconciliation?.ready!==false&&(this.budgetKind()==='test'?this.d.approval&&!r.ledger.usedApprovals.includes(this.d.approval):r.ordinaryLedger.cap-r.ordinaryLedger.spent-r.ordinaryLedger.held>0));}
+  launchEnabled(r){return !!(this.d.enabled&&this.d.connected&&this.canAllocate(r)&&r.operatorBudgetReconciliation?.ready!==false&&(this.budgetKind()==='test'?this.d.approval&&!r.ledger.usedApprovals.includes(this.d.approval)&&campaignView(r,this.d.campaign,this.d.campaignRequired===true,this.d.now())?.ready!==false:r.ordinaryLedger.cap-r.ordinaryLedger.spent-r.ordinaryLedger.held>0));}
   views(r){const ordinary=ordinaryBudgetView(r.ordinaryLedger);return {budget:ordinary,ordinaryBudget:ordinary,testBudget:budgetView(r.ledger,this.d.originalAcceptance),budgetMode:this.budgetKind()};}
-  async status(){const r=await this.read();return {launchEnabled:this.launchEnabled(r),agentToolsEnabled:false,terminalEnabled:false,session:safeSession(r.session),cleanupAttention:!!r.cleanupIncidents?.some(i=>!i.resolved),...this.views(r),operatorBudgetReconciliation:r.operatorBudgetReconciliation};}
+  async status(){const r=await this.read();return {launchEnabled:this.launchEnabled(r),agentToolsEnabled:false,terminalEnabled:false,session:safeSession(r.session),cleanupAttention:!!r.cleanupIncidents?.some(i=>!i.resolved),...this.views(r),operatorBudgetReconciliation:r.operatorBudgetReconciliation,campaign:this.budgetKind()==='test'?campaignView(r,this.d.campaign,this.d.campaignRequired===true,this.d.now()):null};}
   async grant(input){
     if(this.d.validationMode===true)throw new SessionError('ORDINARY_ALLOWANCE_DISABLED_DURING_ACCEPTANCE');
     const grant=parseGrant(input);
@@ -54,13 +56,13 @@ export class SessionEngine {
   }
   async quote(input){
     const minutes=this.lifecycle.quoteMinutes(input,this.d.validationMode===true);
-    const raw=await this.d.catalog(),catalog=this.lifecycle.catalogFrom(raw),q={...this.lifecycle.makeQuote(catalog,this.d.now(),this.d.id(),minutes),live:!!this.d.connected,budgetKind:this.budgetKind(),lifecycleBinding:this.currentBinding()};
+    const raw=await this.d.catalog(),catalog=this.lifecycle.catalogFrom(raw),q={...this.lifecycle.makeQuote(catalog,this.d.now(),this.d.id(),minutes),live:!!this.d.connected,budgetKind:this.budgetKind(),lifecycleBinding:this.currentBinding(),...(this.budgetKind()==='test'&&this.d.campaign?{campaignBinding:campaignBinding(this.d.campaign)}:{})};
     const ceiling=this.d.maxHourly??1;
     // Only a validated Hyperstack lifecycle may use its explicitly bounded
     // target rate. Legacy Runpod retains its existing one-dollar ceiling.
     const targetCeiling=this.lifecycle.provider==='hyperstack'?(this.lifecycle.target?.maximumHourlyUSD??1):1;
     if(!Number.isFinite(ceiling)||ceiling<=0||!Number.isFinite(targetCeiling)||targetCeiling<=0||ceiling>targetCeiling||catalog.totalHourly>ceiling)throw new SessionError('PRICE_CHANGED');
-    return this.tx(r=>{r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,lifecycleBinding:undefined,launchEnabled:this.launchEnabled(r),...this.views(r),includes:q.includes??'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:q.excludes??'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
+    return this.tx(r=>{r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,lifecycleBinding:undefined,campaignBinding:undefined,launchEnabled:this.launchEnabled(r),...this.views(r),includes:q.includes??'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:q.excludes??'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
   }
   async start(input){
     if(!input||Object.keys(input).sort().join()!=='maximumUSD,quoteId'||typeof input.quoteId!=='string')throw new SessionError('INVALID_START',400);
@@ -83,8 +85,9 @@ export class SessionEngine {
       if(ledger.cap-ledger.spent-ledger.held<q.holdUnits)throw new SessionError('BUDGET_EXHAUSTED');
       const marker='session-start-v1:'+q.id;
       if(await tx.get(marker))throw new SessionError('QUOTE_ALREADY_USED');
-      ledger.held+=q.holdUnits;
       r.session={id:this.d.id(),quoteId:q.id,quote:q,budgetKind:kind,approval:kind==='test'?this.d.approval:null,phase:'preflight',requestedAt:this.d.now(),stopRequested:false,createAttempted:false,leaseUntil:0};
+      if(kind==='test')campaignStart(r,r.session,{policy:this.d.campaign,required:this.d.campaignRequired===true,target:this.lifecycle.target,now:this.d.now()});
+      ledger.held+=q.holdUnits;
       await tx.put(marker,{sessionId:r.session.id,budgetKind:kind});
     },this.d.now()+100);
     return this.status();
@@ -105,7 +108,8 @@ export class SessionEngine {
   async rememberPods(s,pods){
     // Keep every observation before any cleanup I/O, not just the chat Pod.
     // The legacy pod field remains evidence for already-persisted sessions.
-    s.knownPodIds=await this.update(s.id,current=>{
+    s.knownPodIds=await this.update(s.id,(current,r)=>{
+      campaignObserve(r,current,pods);
       current.knownPodIds=[...new Set([...knownPodIds(current),...pods.map(p=>p.id)])];
       if(this.d.lifecycle){current.knownAllocations??=[];for(const p of pods)if(!current.knownAllocations.some(a=>a.id===p.id))current.knownAllocations.push(structuredClone(p));}
       return structuredClone(current.knownPodIds);
@@ -172,6 +176,7 @@ export class SessionEngine {
     if(disarmed.some(x=>x.status==='rejected'))throw new SessionError('GUARD_DISARM_PENDING');
     await this.update(s.id,(current,r)=>{
       checked(current);
+      campaignFinish(r,current,phase);
       let debit=0;
       if(current.createAttempted&&!current.definiteNoCreate){
         // Conservative elapsed wall-clock upper estimate, including two extra
@@ -213,6 +218,7 @@ export class SessionEngine {
           if(!this.d.enabled||this.budgetKind()!==kind||(kind==='test'&&this.d.approval!==current.approval))throw new SessionError('LAUNCH_LOCKED');
           if(current.quote.lifecycleBinding!==this.currentBinding())throw new SessionError('QUOTE_CHANGED');
           this.lifecycle.receiptFresh(proof,current.reservation,this.d.now());
+          if(kind==='test')campaignBeforeCreate(r,current,{policy:this.d.campaign,required:this.d.campaignRequired===true,target:this.lifecycle.target,now:this.d.now()});
           current.guardProof=keylessGuardProof(proof,current.reservation,this.d.now());
           current.bootAt=current.reservation.createdNotBefore??this.d.now();current.deadline=current.reservation.deadline??current.bootAt+sessionMinutes(current)*60000;current.phase='reconciling';current.createAttempted=true;
           if(kind==='test')r.ledger.usedApprovals.push(current.approval);return this.lifecycle.createBody(current,current.bootAt);

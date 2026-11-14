@@ -1,8 +1,10 @@
 import {SessionError} from './session-policy.mjs';
 import {safeTailFailure} from './tails.mjs';
+import {CAMPAIGN_ERRORS} from './campaign.mjs';
 
 // These are reviewed classifications, never arbitrary upstream message text.
 const SESSION_CODES=new Set([
+ ...CAMPAIGN_ERRORS,
  'ACCOUNT_HAS_PODS','APPROVAL_ALREADY_USED','APPROVAL_LIMIT','BUDGET_EXHAUSTED',
  'CATALOG_INVALID','GUARD_ARM_FAILED','GUARD_DISARM_PENDING','GUARD_RECEIPTS_EXPIRED','GUARD_VERSION_CHANGED','HOURLY_LIMIT','INVALID_DURATION',
  'KEY_GENERATION_FAILED','LAUNCH_LOCKED','NO_STOCK','PRICE_CHANGED','QUOTE_CHANGED',

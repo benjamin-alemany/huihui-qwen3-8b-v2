@@ -12,15 +12,29 @@
     "servingImage": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278",
     "runtimeProfile": "vm-inference-v1",
     "bootstrapLockSha256": "064b1db71d0511887d42d926ab2d9a4f4ce4df5ef2859a80c7cc26a712881177",
-    "bootstrapBundleSha256": "d184d706b0116fce87987ddf253ba5f9db1ff110491d3dff5629528794f080c6",
-    "bootstrapSourceCommit": "f9e8055422e13800f5daa65a3216c44cdd39c848",
-    "bootstrapBundleSize": 58303,
+    "bootstrapBundleSha256": "14f99b4eb2a747b38b45809340d4e9e09fc2c49d82d2a4123b3a391ef84e137f",
+    "bootstrapSourceCommit": "478b9fa84dff61576dffe74361853a5c887de4a1",
+    "bootstrapBundleSize": 58724,
     "runtimeOrchestrator": "vm-run-v1"
   },
   "hosting": {
     "provider": "hyperstack",
     "ownershipPolicy": "nonce-name-v2",
     "flavor": "n3-A100x1",
+    "acceptanceTargets": [
+      {
+        "flavor": "n3-RTX-A6000x1",
+        "region": "CANADA-1",
+        "vmImageId": 574,
+        "maximumHourlyUSD": 0.507
+      },
+      {
+        "flavor": "n3-A100x1",
+        "region": "CANADA-1",
+        "vmImageId": 574,
+        "maximumHourlyUSD": 1.36
+      }
+    ],
     "region": "CANADA-1",
     "vmImageId": 574,
     "vmImageName": "Ubuntu Server 24.04 LTS (Noble Numbat)",

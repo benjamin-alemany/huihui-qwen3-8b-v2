@@ -10,7 +10,7 @@ The prepared V2 candidate uses a versioned protocol: `nonce-name-v2` binds the f
 
 The reviewed UI refreshes current owner controller state before a new quote and clears prior consent. Safe preflight failure/cancellation reasons persist through cleanup recovery. The exact authenticated Cloudflare logout return canonicalizes to the root; other query and authentication restrictions remain intact. Create diagnostics expose only whitelisted status/reason metadata and bounded response-byte counts, never raw provider responses or credentials. These source fixes do not prove native compatibility or production readiness.
 
-The previous approval remains consumed. A new native allocation requires a separate fresh approval, exact candidate pins and all private spending/guard gates; the public source pin is insufficient by itself. The current execution sequence is in [the single-allocation Hyperstack runbook](HYPERSTACK-CHAT-ACCEPTANCE.md); its thirty-minute session has a fifteen-minute startup cutoff. Do not restart the former Runpod compatibility experiments.
+The previous approval remains consumed. A new native allocation requires a separate fresh approval, exact candidate pins and all private spending/guard gates; the public source pin is insufficient by itself. The current execution sequence is in [the bounded Hyperstack acceptance runbook](HYPERSTACK-CHAT-ACCEPTANCE.md); its thirty-minute session has a fifteen-minute startup cutoff. Do not restart the former Runpod compatibility experiments.
 
 Free code changes do not authorize credit purchases, subscriptions, auto-pay, paid resources, production unlocks or agent execution. Paid acceptance and provider funding retain their separate explicit approval requirements. The owner must complete account/legal/payment actions. Keep all real credentials out of this development checkout and all public evidence.
 
@@ -54,7 +54,7 @@ See `docs/TESTING-AND-RECOVERY.md` for the hardened workflow. Run
 Setup and test phases are separate. Neither phase deploys, downloads a model or
 starts a GPU. Review dependency/runtime risks before executing untrusted changes.
 
-Latest free evidence: 334 Node, 26 chat, 20 controller and 20 guard checks passed. The previously recorded Python suite ran 62 tests with one skip. CPU and published-artifact checks do not establish native target-provider acceptance or production promotion.
+Current campaign/bootstrap evidence: 352 Node, 21 controller and 71 Python/VM checks passed (one Linux-only skip). Existing unchanged chat/guard coverage remains 26/20. CPU and published-artifact checks do not establish native target-provider acceptance or production promotion.
 
 The earlier production-source suite also replayed private real tail exports. In this
 public copy that one fixture case uses sanitized scheduled-tail data, so it is
@@ -79,3 +79,18 @@ GitHub and the full suite was verified locally. Current implementation continues
 in the owner's development workspace. The published code and test instructions
 can be used in another permitted, isolated environment without cloud credentials.
 Do not provision a replacement machine or create recurring work without approval.
+
+## Bounded supervised validation
+
+Current Hyperstack validation additionally requires immutable trusted campaign
+configuration. The same durable ledger preserves parent counters and each
+consumed child approval across GPU choices and deployments. The reviewed targets
+can be selected without editing source. Preparation and authentication precede
+the campaign clock. Expiry is rechecked at Start, durable create consumption and
+immediately before the provider POST; teardown remains available afterward.
+See the acceptance runbook for bounds and fail-closed retry conditions.
+
+The host bootstrap checksum parser now stops at the next signed Release field;
+a valid Docker SHA512 section cannot invalidate its SHA256 entry. Pinned vendor
+keys, package hashes, model revision and serving-image digest remain unchanged.
+Actual target-provider CUDA and Qwen acceptance remain unproven.
