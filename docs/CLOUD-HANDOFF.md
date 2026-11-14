@@ -94,3 +94,5 @@ The host bootstrap checksum parser now stops at the next signed Release field;
 a valid Docker SHA512 section cannot invalidate its SHA256 entry. Pinned vendor
 keys, package hashes, model revision and serving-image digest remain unchanged.
 Actual target-provider CUDA and Qwen acceptance remain unproven.
+
+The first supervised campaign allocation installed packages and rebooted, then failed a stage formerly labeled `driver-check`; that label also covered NVIDIA runtime configuration and Docker startup. It did not establish which subcommand failed or that the NVIDIA driver was incompatible. The exact locked Docker CE unit supplies `-H fd://` and a protected Unix socket; a duplicate `hosts` directive in the former daemon configuration was a confirmed startup conflict. The reviewed fix removes only that duplicate and distinguishes driver, runtime configuration and Docker-start events. Native CUDA and model response remain unproven; cleanup of the failed allocation was verified. The manual Docker-daemon CPU workflow validates the exact locked binary without starting a daemon; its result is not native GPU acceptance.
