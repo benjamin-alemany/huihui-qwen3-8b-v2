@@ -10,6 +10,7 @@ from attach_model_network import owned
 from attestation import context_digest,verify_receipt
 from native_attest import mounts_from,verify_sockets,same_bind,reviewed_gpu_file
 import console_diagnostics as diagnostics
+import bootstrap
 HERE=Path(__file__).resolve().parent
 class PreparedVMTests(unittest.TestCase):
  def fixture(self):return {'version':1,'sessionId':'11111111-1111-4111-8111-111111111111','nonce':'c'*32,'createdAt':'2026-11-11T12:00:00Z','deadlineUTC':'2026-11-11T12:30:00Z','image':'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'1'*64,'resources':{'vmId':123,'publicIpAddress':'203.0.113.1','volumeIds':[]}}
@@ -58,6 +59,59 @@ class PreparedVMTests(unittest.TestCase):
   args=docker_arguments(self.fixture());self.assertIn('--network=none',args);self.assertIn('--read-only',args);self.assertIn('--restart=no',args);self.assertIn('--cap-drop=ALL',args);self.assertIn('--security-opt=no-new-privileges',args);self.assertIn('--ipc=private',args)
   text=' '.join(args);self.assertNotIn('--privileged',text);self.assertNotIn('--pid=host',text);self.assertNotIn('docker.sock',text);self.assertIn('target=/etc/resolv.conf,readonly',text);self.assertNotIn('--publish',text)
   self.assertIn('--env=NVIDIA_DRIVER_CAPABILITIES=compute',args);self.assertIn('target=/run/unjailed/attestation,readonly',text)
+ def _reboot_bootstrap(self,old_hosts=False,fail_at=None):
+  # Exercise the real post-reboot bootstrap/catch path with dummy commands and
+  # Docker CE's existing systemd -H fd:// listener; no host commands execute.
+  with tempfile.TemporaryDirectory() as directory:
+   sandbox=Path(directory);state_path=sandbox/'state/bootstrap.json';state_path.parent.mkdir();session_path=sandbox/'session.json'
+   m=self.fixture();now=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp();previous=progress(m,None,now,'before-reboot');previous['phase']='awaiting-reboot'
+   state_path.write_text(json.dumps(previous));session_path.write_text(json.dumps(m));events=[];commands=[];output=io.StringIO();error=None
+   boot=sandbox/'proc/sys/kernel/random/boot_id';boot.parent.mkdir(parents=True);boot.write_text('after-reboot')
+   (sandbox/'etc/systemd/system').mkdir(parents=True)
+   def vm_path(*args):
+    value=Path(*args)
+    if value.is_absolute() and (str(value).startswith('/etc/') or str(value).startswith('/proc/')):return sandbox/str(value).lstrip('/')
+    return value
+   def root_file(p):
+    self.assertIn(Path(p),[session_path,state_path]);return Path(p)
+   def emit(manifest,component,phase,status='running'):
+    events.append(json.loads(diagnostics.event(manifest,component,phase,status,now+120).decode().strip().removeprefix(diagnostics.PREFIX)))
+   def copy_config(src,dst):
+    self.assertEqual(src,HERE/'daemon.json');self.assertEqual(dst,'/etc/docker/daemon.json')
+    config=json.loads(Path(src).read_text())
+    if old_hosts:config['hosts']=['unix:///var/run/docker.sock']
+    (sandbox/'etc/docker/daemon.json').write_text(json.dumps(config))
+   def run(args,timeout=1200):
+    commands.append(args)
+    if args==['nvidia-ctk','runtime','configure','--runtime=docker']:
+     self.assertTrue(any(e['phase']=='driver-check' and e['status']=='passed' for e in events))
+     if fail_at=='docker-runtime-config':raise Refused('DUMMY_PRIVATE_TOOLKIT_ERROR')
+     config=json.loads((sandbox/'etc/docker/daemon.json').read_text());config['runtimes']={'nvidia':{'path':'nvidia-container-runtime','runtimeArgs':[]}};(sandbox/'etc/docker/daemon.json').write_text(json.dumps(config))
+    elif args==['systemctl','restart','docker']:
+     # Docker refuses duplicate listener configuration even if both values
+     # select Unix sockets. The installed CE unit retains its own -H fd://.
+     unit_args=['/usr/bin/dockerd','-H','fd://','--containerd=/run/containerd/containerd.sock'];config=json.loads((sandbox/'etc/docker/daemon.json').read_text())
+     if 'hosts' in config and '-H' in unit_args:raise Refused('DUMMY_PRIVATE_DUPLICATE_DOCKER_HOSTS')
+     if fail_at=='docker-start':raise Refused('DUMMY_PRIVATE_DOCKER_START_ERROR')
+    else:self.assertIn(args,[['systemctl','daemon-reload'],['systemctl','enable','--now','unjailed-deadline.timer']])
+    return ''
+   with patch.object(bootstrap,'STATE',state_path),patch.object(bootstrap,'SESSION',session_path),patch.object(bootstrap,'Path',side_effect=vm_path),patch.object(bootstrap,'root_file',side_effect=root_file),patch.object(bootstrap,'host'),patch.object(bootstrap,'kernel_probe') as probe,patch.object(bootstrap,'run',side_effect=run),patch.object(bootstrap,'emit',side_effect=emit),patch.object(bootstrap.shutil,'copyfile',side_effect=copy_config),patch.object(bootstrap.fcntl,'flock'),patch.object(bootstrap.time,'time',return_value=now+120),patch.object(bootstrap.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='')) as cleanup,patch.object(sys,'argv',['bootstrap.py','--execute']),redirect_stdout(output),redirect_stderr(output):
+    try:bootstrap.main()
+    except Refused as caught:error=caught
+   probe.assert_called_once();state=json.loads(state_path.read_text());config=json.loads((sandbox/'etc/docker/daemon.json').read_text())
+   return SimpleNamespace(state=state,config=config,events=events,commands=commands,output=output.getvalue(),error=error,cleanup=cleanup.call_args_list)
+ def test_bootstrap_uses_existing_systemd_docker_listener_without_duplicate_hosts_or_weaker_network_policy(self):
+  result=self._reboot_bootstrap();self.assertIsNone(result.error);self.assertNotIn('hosts',result.config)
+  expected={'iptables':False,'ip6tables':False,'ip-forward':False,'userland-proxy':False,'live-restore':False,'bridge':'none','log-driver':'local','log-opts':{'max-size':'10m','max-file':'2'}}
+  self.assertEqual(json.loads((HERE/'daemon.json').read_text()),expected);self.assertEqual({k:v for k,v in result.config.items() if k!='runtimes'},expected)
+  passed=[e['phase'] for e in result.events if e['status']=='passed'];self.assertEqual(passed,['driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']);self.assertEqual(result.state['phase'],'host-ready-model-not-started');self.assertEqual(result.cleanup,[])
+ def test_duplicate_docker_listener_or_docker_start_failure_is_reported_after_driver_pass_without_model_start(self):
+  for options in [{'old_hosts':True},{'fail_at':'docker-start'},{'fail_at':'docker-runtime-config'}]:
+   with self.subTest(options=options):
+    result=self._reboot_bootstrap(**options);phase=options.get('fail_at','docker-start');self.assertIsInstance(result.error,Refused);self.assertEqual(result.state['failurePhase'],phase);self.assertEqual(result.state['phase'],'failed');self.assertEqual(result.state['deadlineUTC'],self.fixture()['deadlineUTC'])
+    self.assertTrue(any(e['phase']=='driver-check' and e['status']=='passed' for e in result.events));self.assertEqual(result.events[-1]['phase'],phase);self.assertEqual(result.events[-1]['status'],'failed');self.assertFalse(any(e['phase'] in ['host-ready-model-not-started','model-starting','ready'] for e in result.events));self.assertNotIn('HOST_READY_MODEL_NOT_STARTED',result.output);self.assertNotIn('DUMMY_PRIVATE',json.dumps(result.state)+json.dumps(result.events)+result.output)
+    self.assertEqual(result.cleanup[0].args[0],['systemctl','stop','docker'])
+    if phase=='docker-runtime-config':self.assertNotIn(['systemctl','restart','docker'],result.commands)
  def test_nft_is_external_default_deny_both_ip_families_and_tunnel_uid_only(self):
   rules=nftables();self.assertEqual(rules.count('policy drop'),3);self.assertIn('iifname "uj-m-host" counter drop',rules);self.assertNotIn('ip6 daddr',rules);self.assertIn('table inet unjailed',rules)
   for line in rules.splitlines():

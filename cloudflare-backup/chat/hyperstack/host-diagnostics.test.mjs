@@ -97,10 +97,16 @@ test('parser drops foreign/malformed/unknown/extra/duplicate-field events and al
 });
 
 test('parser permits only explicit component phases and statuses, without conferring health',()=>{
-  const q=reservation();for(const [component,phase]of [['bootstrap','driver-check'],['bootstrap','host-ready-model-not-started'],['runtime','ready']])for(const status of ['running','failed','passed']){
+  const q=reservation();for(const [component,phase]of [['bootstrap','driver-check'],['bootstrap','docker-runtime-config'],['bootstrap','docker-start'],['bootstrap','host-ready-model-not-started'],['runtime','ready']])for(const status of ['running','failed','passed']){
     const e=event(q,{component,phase,status});assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify(e),{reservation:q,sessionId:SESSION,observedAt:NOW}),[e]);
   }
   assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify(event(q,{component:'bootstrap',phase:'ready'})),{reservation:q,sessionId:SESSION,observedAt:NOW}),[]);
+});
+
+test('a post-driver Docker failure remains a diagnostic stage and never becomes a model readiness claim',()=>{
+ const q=reservation(),markers=[event(q,{component:'bootstrap',phase:'driver-check',status:'passed'}),event(q,{component:'bootstrap',phase:'docker-runtime-config',status:'passed'}),event(q,{component:'bootstrap',phase:'docker-start',status:'failed'})];
+ const events=parseHostEvents(markers.map(e=>PREFIX+JSON.stringify(e)).join('\n'),{reservation:q,sessionId:SESSION,observedAt:NOW});assert.deepEqual(events,markers);
+ const receipt=safeDiagnosticReceipt({version:1,provider:'hyperstack',kind:'host-console-progress-v1',state:'available',sessionId:SESSION,nonce:q.nonce,deadline:q.deadline,allocationId:'44',observedAt:NOW,events,diagnosticOnly:true},{allocation:setup().p,reservation:q,sessionId:SESSION});assert.equal(receipt.diagnosticOnly,true);assert.equal(receipt.events.at(-1).phase,'docker-start');assert(!receipt.events.some(e=>e.phase==='model-starting'||e.phase==='ready'));assert(!('modelLoaded'in receipt));
 });
 
 test('parser enforces line/body bounds and retains at most the last sixteen valid markers',()=>{

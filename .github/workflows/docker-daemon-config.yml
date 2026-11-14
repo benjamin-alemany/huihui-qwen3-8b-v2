@@ -1,0 +1,24 @@
+name: Locked Docker daemon configuration CPU verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: qwen-docker-daemon-config-cpu
+  cancel-in-progress: false
+jobs:
+  verify:
+    # Manual standard public runner only: no GPU, cloud keys or publication.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify locked Docker CE config and duplicate-hosts regression without starting Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C \
+            python3 -I -B vm/verify_docker_daemon_config.py --verify

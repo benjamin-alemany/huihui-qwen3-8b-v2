@@ -124,8 +124,12 @@ def main():
                 run(['systemctl','daemon-reload']);run(['systemctl','enable','unjailed-bootstrap.service']);run(['systemctl','reboot']);return
             if state['phase']=='installing':raise Refused('Interrupted installation requires operator review; no automatic reinstall')
             if state['phase']=='awaiting-reboot' and old_boot==boot:raise Refused('Driver reboot not observed')
-            report('driver-check');kernel_probe(lock,platform.release());Path('/etc/docker').mkdir(exist_ok=True)
-            shutil.copyfile(HERE/'daemon.json','/etc/docker/daemon.json');run(['nvidia-ctk','runtime','configure','--runtime=docker']);run(['systemctl','restart','docker'])
+            report('driver-check');kernel_probe(lock,platform.release());report('driver-check','passed')
+            report('docker-runtime-config');Path('/etc/docker').mkdir(exist_ok=True)
+            # Docker CE's systemd unit already supplies -H fd://. A second
+            # hosts directive in daemon.json makes dockerd refuse startup.
+            shutil.copyfile(HERE/'daemon.json','/etc/docker/daemon.json');run(['nvidia-ctk','runtime','configure','--runtime=docker']);report('docker-runtime-config','passed')
+            report('docker-start');run(['systemctl','restart','docker']);report('docker-start','passed')
             save('host-ready-model-not-started');print('HOST_READY_MODEL_NOT_STARTED')
         except Exception:
             state['failurePhase']=diagnostic_phase;state['phase']='failed';atomic(STATE,state);report(diagnostic_phase,'failed')
