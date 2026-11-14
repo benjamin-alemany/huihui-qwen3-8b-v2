@@ -1,5 +1,6 @@
 name: Locked Docker daemon configuration CPU verification
 on:
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
