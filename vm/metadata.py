@@ -23,10 +23,21 @@ def fetch(url,limit):
     return raw
 
 def verify_index(release,index,name,algorithm):
-    section=release.decode().split(algorithm.upper()+':',1)
-    if len(section)!=2:raise Refused('Signed index digest absent')
-    rows=[line.split() for line in section[1].splitlines()]
-    matches=[r for r in rows if len(r)==3 and r[2]==name]
+    if algorithm not in ('sha256','sha512'):raise Refused('Unreviewed signed index digest algorithm')
+    try:lines=release.decode('utf-8').splitlines()
+    except UnicodeError:raise Refused('Invalid signed release encoding')
+    headers=[i for i,line in enumerate(lines) if line==algorithm.upper()+':']
+    if len(headers)!=1:raise Refused('Signed index digest absent or ambiguous')
+    # Debian Release checksum fields contain indented rows. Stop at the next
+    # field instead of collecting a second row from a later SHA512 section.
+    # The complete InRelease has already passed the pinned-key GPG check.
+    rows=[]
+    for line in lines[headers[0]+1:]:
+        if not line.startswith((' ','\t')):break
+        row=line.split()
+        if len(row)!=3 or not re.fullmatch('[0-9a-f]{'+str(hashlib.new(algorithm).digest_size*2)+'}',row[0]) or not re.fullmatch('[0-9]+',row[1]):raise Refused('Invalid signed index digest row')
+        rows.append(row)
+    matches=[r for r in rows if r[2]==name]
     if len(matches)!=1 or int(matches[0][1])!=len(index) or hashlib.new(algorithm,index).hexdigest()!=matches[0][0]:raise Refused('Signed index digest mismatch')
 
 def verify(lock,read=fetch,gpgv='gpgv'):
