@@ -8,14 +8,53 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from host_policy import Refused,root_file,manifest_from,progress,atomic,deadline_units,timestamp
 from metadata import records
-from console_diagnostics import emit
+from console_diagnostics import emit,APT_DIAGNOSTIC_PHASES
 HERE=Path(__file__).resolve().parent
 STATE=Path('/var/lib/unjailed/bootstrap.json');SESSION=Path('/etc/unjailed/session.json')
 ENV={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND':'noninteractive','LC_ALL':'C'}
 METADATA_SECONDS=120
 APT_REFRESH_SECONDS=120
 MAX_COMMAND_OUTPUT=1024*1024
+MAX_APT_OUTPUT=64*1024
 _BUDGET=None
+
+def apt_failure_phases(raw,outcome,returncode=None):
+    # APT output is untrusted. Extract only fixed indicators from diagnostic
+    # blocks, never successful URLs, arbitrary errors, credentials or paths.
+    text=bytes(raw[:MAX_APT_OUTPUT]).decode('utf-8',errors='replace');blocks=[]
+    for line in text.splitlines():
+        if re.match(r'^(?:Err:\d+\s|[EW]:\s)',line):blocks.append(line)
+        elif blocks and line.startswith((' ','\t')):blocks[-1]+=' '+line
+    patterns={
+      'dns':r'temporary failure resolving|could not resolve|name or service not known',
+      'network':r'could not connect|cannot connect|connection (?:timed out|refused|failed|reset)|network is unreachable|no route to host',
+      'tls':r'certificate verification failed|certificate is not trusted|certificate issuer is unknown|could not handshake|tls connection|ssl certificate',
+      'signature':r'no_pubkey|badsig|expkeysig|signatures? (?:were|couldn.t be|could not be)|not signed|invalid signature',
+      'integrity':r'hash sum mismatch|file has unexpected size|hashes? of expected file',
+      'lock':r'could not get lock|unable to acquire .*lock|unable to lock',
+      'repository':r'does not have a release file|404 not found|403 forbidden'}
+    categories=set();repositories=set()
+    for block in blocks:
+        found={name for name,pattern in patterns.items() if re.search(pattern,block,re.I)}
+        categories.update(found)
+        for url in re.findall(r'https?://[^\s\x27"<>]+',block):
+            try:host=urllib.parse.urlsplit(url).hostname
+            except ValueError:continue
+            if host in ('archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com') or host and host.endswith('.archive.ubuntu.com'):repositories.add('ubuntu')
+            elif host=='developer.download.nvidia.com':repositories.add('cuda')
+            elif host=='nvidia.github.io':repositories.add('toolkit')
+            elif host=='download.docker.com':repositories.add('docker')
+    category=next(iter(categories)) if len(categories)==1 else 'multiple' if categories else 'unknown'
+    repository=next(iter(repositories)) if len(repositories)==1 else 'multiple' if repositories else 'unknown'
+    if outcome=='exit':outcome='exit-100' if returncode==100 else 'exit-other'
+    if outcome not in ('exit-100','exit-other','signal','timeout','deadline','output-bound'):outcome='unknown'
+    return ('apt-failure-'+outcome,'apt-error-'+category,'apt-repo-'+repository)
+
+class AptRefreshError(Refused):
+    def __init__(self,raw,outcome,returncode=None):
+        self.phases=apt_failure_phases(raw,outcome,returncode)
+        if any(phase not in APT_DIAGNOSTIC_PHASES for phase in self.phases):raise Refused('Invalid fixed APT diagnosis')
+        super().__init__('Trusted APT refresh refused')
 
 class StartupBudget:
     def __init__(self,m):
@@ -27,25 +66,35 @@ class StartupBudget:
         if remaining<=0:raise Refused('Original bootstrap startup deadline reached')
         return remaining
 
-def run(args,timeout=1200,line_callback=None):
+def run(args,timeout=1200,line_callback=None,capture_apt_failure=False):
     # A socket's timeout is not an overall download deadline. Supervise the
     # complete trusted operation, including DNS, slow reads and its children.
     if type(timeout) not in (int,float) or not 0<timeout<=1200:raise Refused('Invalid bootstrap command deadline')
-    if _BUDGET is not None:timeout=min(timeout,_BUDGET.remaining())
-    deadline=time.monotonic()+timeout;output=bytearray();pending=bytearray();complete=False
-    process=subprocess.Popen(args,env=ENV,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+    if type(capture_apt_failure) is not bool or capture_apt_failure and (args!=apt_refresh_arguments() or line_callback is not None):raise Refused('APT diagnosis requires fixed refresh operation')
+    output=bytearray();pending=bytearray();complete=False
+    def denied(message,kind='unknown',code=None):
+        if capture_apt_failure:raise AptRefreshError(output,kind,code)
+        raise Refused(message)
+    if _BUDGET is not None:
+        try:timeout=min(timeout,_BUDGET.remaining())
+        except Refused:denied('Original bootstrap startup deadline reached','deadline')
+    deadline=time.monotonic()+timeout
+    try:process=subprocess.Popen(args,env=ENV,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT if capture_apt_failure else subprocess.DEVNULL,start_new_session=True)
+    except OSError:denied('Trusted bootstrap command failed')
     try:
         with selectors.DefaultSelector() as selector:
             os.set_blocking(process.stdout.fileno(),False);selector.register(process.stdout,selectors.EVENT_READ)
             while selector.get_map() or process.poll() is None:
                 remaining=deadline-time.monotonic()
-                if _BUDGET is not None:remaining=min(remaining,_BUDGET.remaining())
-                if remaining<=0:raise Refused('Trusted bootstrap command timed out')
+                if _BUDGET is not None:
+                    try:remaining=min(remaining,_BUDGET.remaining())
+                    except Refused:denied('Original bootstrap startup deadline reached','deadline')
+                if remaining<=0:denied('Trusted bootstrap command timed out','timeout')
                 for key,_ in selector.select(min(.1,remaining)):
                     data=os.read(key.fd,65536)
                     if not data:selector.unregister(key.fileobj);continue
-                    output.extend(data)
-                    if len(output)>MAX_COMMAND_OUTPUT:raise Refused('Trusted bootstrap output exceeds bound')
+                    limit=MAX_APT_OUTPUT if capture_apt_failure else MAX_COMMAND_OUTPUT;available=limit-len(output);output.extend(data[:available])
+                    if len(data)>available:denied('Trusted bootstrap output exceeds bound','output-bound')
                     if line_callback is not None:
                         pending.extend(data)
                         while b'\n' in pending:
@@ -53,8 +102,13 @@ def run(args,timeout=1200,line_callback=None):
                             line_callback(line.decode('ascii'))
                         if len(pending)>1024:raise Refused('Trusted bootstrap progress exceeds bound')
             if line_callback is not None and pending:raise Refused('Incomplete trusted bootstrap progress')
-        if process.wait()!=0:raise Refused('Trusted bootstrap command failed')
+        code=process.wait()
+        if code!=0:denied('Trusted bootstrap command failed','signal' if code<0 else 'exit',code)
         complete=True;return output.decode('utf-8')
+    except AptRefreshError:raise
+    except Exception:
+        if capture_apt_failure:raise AptRefreshError(output,'unknown') from None
+        raise
     finally:
         if not complete:
             # Only this newly created process group. Never remove APT locks,
@@ -85,8 +139,12 @@ def verify_metadata(report):
 def apt_refresh_arguments():
     return ['apt-get','--error-on=any','-o','Acquire::Retries=0','-o','Acquire::http::Timeout=20','-o','Acquire::https::Timeout=20','-o','APT::Get::AllowUnauthenticated=false','-o','Acquire::AllowInsecureRepositories=false','-o','Acquire::AllowDowngradeToInsecureRepositories=false','update']
 
-def refresh_indexes():
-    return run(apt_refresh_arguments(),timeout=APT_REFRESH_SECONDS)
+def refresh_indexes(diagnostic=None):
+    try:run(apt_refresh_arguments(),timeout=APT_REFRESH_SECONDS,capture_apt_failure=True)
+    except AptRefreshError as error:
+        if diagnostic:
+            for phase in error.phases:diagnostic(phase)
+        raise
 
 def host():
     if os.geteuid()!=0 or sys.platform!='linux' or platform.machine()!='x86_64':raise Refused('Dedicated amd64 Linux root host required')
@@ -203,7 +261,7 @@ def bootstrap(m):
             if state['phase']=='new':
                 atomic(STATE,state);report('metadata-review');verify_metadata(report);report('metadata-review','passed')
                 report('apt-source-review');apt_sources(lock);validate_apt_sources();report('apt-source-review','passed')
-                report('apt-index-refresh');refresh_indexes();report('apt-index-refresh','passed');save('installing')
+                report('apt-index-refresh');refresh_indexes(diagnostic=lambda phase:emit(m,'bootstrap',phase,'failed'));report('apt-index-refresh','passed');save('installing')
                 install(lock,platform.release(),report=report);save('awaiting-reboot')
                 shutil.copyfile(HERE/'bootstrap.service','/etc/systemd/system/unjailed-bootstrap.service')
                 run(['systemctl','daemon-reload']);run(['systemctl','enable','unjailed-bootstrap.service']);run(['systemctl','reboot']);return

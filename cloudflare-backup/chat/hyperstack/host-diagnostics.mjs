@@ -11,7 +11,10 @@ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const FIELDS=['version','sessionId','nonce','component','phase','status','at','deadline'];
 const RECEIPT_FIELDS=['version','provider','kind','state','sessionId','nonce','deadline','allocationId','observedAt','events','diagnosticOnly'];
 const PHASES=Object.freeze({
-  bootstrap:new Set(['new','metadata-review','metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','installing','package-resolve','package-download','package-verify','package-install','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']),
+  bootstrap:new Set(['new','metadata-review','metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','installing','package-resolve','package-download','package-verify','package-install','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started',
+    'apt-failure-exit-100','apt-failure-exit-other','apt-failure-signal','apt-failure-timeout','apt-failure-deadline','apt-failure-output-bound','apt-failure-unknown',
+    'apt-error-dns','apt-error-network','apt-error-tls','apt-error-signature','apt-error-integrity','apt-error-lock','apt-error-repository','apt-error-multiple','apt-error-unknown',
+    'apt-repo-ubuntu','apt-repo-cuda','apt-repo-toolkit','apt-repo-docker','apt-repo-multiple','apt-repo-unknown']),
   runtime:new Set(['preparing','image-pull','connector-install','host-boundary-probe','sealing','container-create','native-boundary','model-free-preflight','awaiting-provider-firewall-permit','model-starting','ready'])
 });
 const plain=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -32,7 +35,7 @@ export function parseHostEvents(logs,{reservation,sessionId,observedAt}={}){
     // The host emits simple ASCII field names and scalar values. Counting the
     // exact keys also rejects duplicate/escaped keys that JSON.parse hides.
     const keys=[...text.matchAll(/"([A-Za-z][A-Za-z0-9]*)"\s*:/g)].map(m=>m[1]);
-    if(!exact(e,FIELDS)||keys.length!==FIELDS.length||new Set(keys).size!==FIELDS.length||keys.some(k=>!FIELDS.includes(k))||e.version!==1||e.sessionId!==sessionId||e.nonce!==q.nonce||!Object.hasOwn(PHASES,e.component)||!PHASES[e.component].has(e.phase)||!['running','failed','passed'].includes(e.status)||!safeTime(e.at)||e.at<q.createdNotBefore||e.at>Math.min(observedAt,q.deadline)||e.deadline!==q.deadline)continue;
+    if(!exact(e,FIELDS)||keys.length!==FIELDS.length||new Set(keys).size!==FIELDS.length||keys.some(k=>!FIELDS.includes(k))||e.version!==1||e.sessionId!==sessionId||e.nonce!==q.nonce||!Object.hasOwn(PHASES,e.component)||!PHASES[e.component].has(e.phase)||!['running','failed','passed'].includes(e.status)||/^(apt-failure-|apt-error-|apt-repo-)/.test(e.phase)&&e.status!=='failed'||!safeTime(e.at)||e.at<q.createdNotBefore||e.at>Math.min(observedAt,q.deadline)||e.deadline!==q.deadline)continue;
     events.push({version:1,sessionId,nonce:q.nonce,component:e.component,phase:e.phase,status:e.status,at:e.at,deadline:q.deadline});
     if(events.length>16)events.shift();
   }

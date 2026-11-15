@@ -27,6 +27,14 @@ test('fixed vendor/APT/package substages remain diagnostic-only and reject arbit
  }
  for(const patch of [{phase:'apt-index-refresh '+SECRET},{phase:'metadata-'+SECRET},{phase:'apt-index-refresh',error:SECRET}])assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify(event(q,{component:'bootstrap',...patch})),{reservation:q,sessionId:SESSION,observedAt:NOW}),[]);
 });
+test('APT failure indicators accept only fixed labels and cannot claim passed/running status',()=>{
+ const q=reservation(),phases=['apt-failure-exit-100','apt-failure-exit-other','apt-failure-signal','apt-failure-timeout','apt-failure-deadline','apt-failure-output-bound','apt-failure-unknown','apt-error-dns','apt-error-network','apt-error-tls','apt-error-signature','apt-error-integrity','apt-error-lock','apt-error-repository','apt-error-multiple','apt-error-unknown','apt-repo-ubuntu','apt-repo-cuda','apt-repo-toolkit','apt-repo-docker','apt-repo-multiple','apt-repo-unknown'];
+ for(const phase of phases){
+  const e=event(q,{component:'bootstrap',phase,status:'failed'});assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify(e),{reservation:q,sessionId:SESSION,observedAt:NOW}),[e]);
+  for(const status of ['running','passed'])assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify({...e,status}),{reservation:q,sessionId:SESSION,observedAt:NOW}),[]);
+ }
+ const malicious=event(q,{component:'bootstrap',phase:'apt-error-'+SECRET,status:'failed'});assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify(malicious),{reservation:q,sessionId:SESSION,observedAt:NOW}),[]);
+});
 
 test('console reader uses official fixed async endpoint with fresh ACTIVE ownership before POST and GET',async()=>{
   const {s,args,q,p}=setup(),r=await collectHostDiagnostics(args);

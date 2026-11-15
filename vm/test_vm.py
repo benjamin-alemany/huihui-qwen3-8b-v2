@@ -68,7 +68,50 @@ class PreparedVMTests(unittest.TestCase):
   self.assertNotIn('ForceIPv4',' '.join(args));self.assertNotIn('Verify-Peer=false',' '.join(args))
   with patch.object(bootstrap,'run',side_effect=Refused('partial update')) as run:
    with self.assertRaises(Refused):bootstrap.refresh_indexes()
-   run.assert_called_once_with(args,timeout=120)
+   run.assert_called_once_with(args,timeout=120,capture_apt_failure=True)
+ def test_apt_failure_classifier_has_only_fixed_categories_and_error_repo_labels(self):
+  cases=[
+   ('E: Failed to fetch https://security.ubuntu.com/index Temporary failure resolving name','dns','ubuntu'),
+   ('Err:1 https://developer.download.nvidia.com/index /\n  Connection timed out','network','cuda'),
+   ('Err:1 https://download.docker.com/index stable\n  Certificate verification failed','tls','docker'),
+   ('W: GPG error: https://nvidia.github.io/index NO_PUBKEY DUMMY_PRIVATE','signature','toolkit'),
+   ('E: Failed to fetch https://developer.download.nvidia.com/index Hash Sum mismatch','integrity','cuda'),
+   ('E: Could not get lock /var/lib/apt/lists/lock. It is held by process 123','lock','unknown'),
+   ('E: The repository https://archive.ubuntu.com/index does not have a Release file.','repository','ubuntu'),
+   ('Get:1 https://download.docker.com/index stable\nDUMMY_PRIVATE_UNKNOWN_CONTENT','unknown','unknown')]
+  for text,category,repo in cases:
+   with self.subTest(category=category):self.assertEqual(bootstrap.apt_failure_phases(text.encode(),'exit',100),('apt-failure-exit-100','apt-error-'+category,'apt-repo-'+repo))
+  combined=cases[0][0]+'\n'+cases[2][0];self.assertEqual(bootstrap.apt_failure_phases(combined.encode(),'signal',-15),('apt-failure-signal','apt-error-multiple','apt-repo-multiple'))
+  phases=bootstrap.apt_failure_phases(b'E: Failed to fetch https://download.docker.com.attacker.invalid/index Connection refused','DUMMY_PRIVATE',1);self.assertEqual(phases,('apt-failure-unknown','apt-error-network','apt-repo-unknown'))
+ def test_apt_stderr_canary_is_classified_in_memory_without_raw_errors_or_success_fallback(self):
+  real_popen=subprocess.Popen;secret='DUMMY_PRIVATE_STDERR_CANARY';events=[];output=io.StringIO()
+  script="import sys\nprint('Get:1 https://download.docker.com/index stable')\nprint(%r,file=sys.stderr,flush=True)\nsys.exit(100)\n"%('E: Failed to fetch https://security.ubuntu.com/index Temporary failure resolving name '+secret)
+  def spawn(args,**kwargs):
+   self.assertEqual(args,bootstrap.apt_refresh_arguments());self.assertEqual(kwargs['stderr'],subprocess.STDOUT);self.assertEqual(kwargs['env'],bootstrap.ENV)
+   return real_popen([sys.executable,'-I','-S','-c',script],**kwargs)
+  with patch.object(bootstrap.subprocess,'Popen',side_effect=spawn),redirect_stdout(output),redirect_stderr(output):
+   with self.assertRaises(bootstrap.AptRefreshError) as caught:bootstrap.refresh_indexes(diagnostic=events.append)
+  self.assertEqual(events,['apt-failure-exit-100','apt-error-dns','apt-repo-ubuntu']);self.assertEqual(set(vars(caught.exception)),{'phases'})
+  self.assertNotIn(secret,str(caught.exception)+repr(vars(caught.exception))+output.getvalue());self.assertNotIn('https://',repr(vars(caught.exception)));self.assertEqual(output.getvalue(),'')
+ def test_apt_timeout_signal_nonstandard_exit_and_output_limit_only_emit_closed_indicators(self):
+  real_popen=subprocess.Popen
+  cases=[("import sys,time\nprint('Err:1 https://developer.download.nvidia.com/index /',flush=True)\nprint('  Connection timed out',file=sys.stderr,flush=True)\ntime.sleep(9)",'timeout','network','cuda'),("import os,signal\nos.kill(os.getpid(),signal.SIGTERM)",'signal','unknown','unknown'),("raise SystemExit(7)",'exit-other','unknown','unknown'),("print('DUMMY_PRIVATE'+'x'*70000,flush=True)",'output-bound','unknown','unknown')]
+  for script,outcome,category,repo in cases:
+   events=[]
+   with self.subTest(outcome=outcome),patch.object(bootstrap.subprocess,'Popen',side_effect=lambda args,**kwargs:real_popen([sys.executable,'-I','-S','-c',script],**kwargs)),patch.object(bootstrap,'APT_REFRESH_SECONDS',.15):
+    with self.assertRaises(bootstrap.AptRefreshError) as caught:bootstrap.refresh_indexes(diagnostic=events.append)
+   self.assertEqual(events,['apt-failure-'+outcome,'apt-error-'+category,'apt-repo-'+repo]);self.assertNotIn('DUMMY_PRIVATE',str(caught.exception)+repr(vars(caught.exception)))
+  expired=SimpleNamespace(remaining=lambda:(_ for _ in ()).throw(Refused('DUMMY_PRIVATE_DEADLINE')));events=[]
+  with patch.object(bootstrap,'_BUDGET',expired),patch.object(bootstrap.subprocess,'Popen') as spawned:
+   with self.assertRaises(bootstrap.AptRefreshError):bootstrap.refresh_indexes(diagnostic=events.append)
+   spawned.assert_not_called()
+  self.assertEqual(events,['apt-failure-deadline','apt-error-unknown','apt-repo-unknown'])
+ def test_apt_failure_indicators_cannot_emit_as_success_or_arbitrary_console_fields(self):
+  m=self.fixture();at=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp()+1
+  for phase in diagnostics.APT_DIAGNOSTIC_PHASES:
+   raw=diagnostics.event(m,'bootstrap',phase,'failed',at);self.assertLessEqual(len(raw),1024);self.assertEqual(set(json.loads(raw.decode().strip().removeprefix(diagnostics.PREFIX))),{'version','sessionId','nonce','component','phase','status','at','deadline'})
+   for status in ['running','passed']:
+    with self.assertRaises(ValueError):diagnostics.event(m,'bootstrap',phase,status,at)
  def test_failed_vendor_or_partial_apt_refresh_never_reaches_package_install_or_reboot(self):
   for failed in ['metadata-toolkit','apt-index-refresh']:
    with self.subTest(phase=failed),tempfile.TemporaryDirectory() as directory:
@@ -84,7 +127,12 @@ class PreparedVMTests(unittest.TestCase):
       report(phase,'running')
       if phase==failed:raise Refused('DUMMY_PRIVATE_VENDOR_ERROR')
       report(phase,'passed')
-    contexts=[patch.object(bootstrap,'STATE',state),patch.object(bootstrap,'SESSION',session),patch.object(bootstrap,'Path',side_effect=vm_path),patch.object(bootstrap,'root_file',side_effect=lambda p:Path(p)),patch.object(bootstrap,'host'),patch.object(bootstrap,'verify_metadata',side_effect=metadata),patch.object(bootstrap,'apt_sources'),patch.object(bootstrap,'validate_apt_sources'),patch.object(bootstrap,'refresh_indexes',side_effect=Refused('DUMMY_PRIVATE_APT_PARTIAL_FAILURE')),patch.object(bootstrap,'run',side_effect=lambda args,timeout=1200:commands.append(args)),patch.object(bootstrap,'emit',side_effect=emit),patch.object(bootstrap.fcntl,'flock'),patch.object(bootstrap.time,'time',return_value=now),patch.object(bootstrap.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='')),patch.object(sys,'argv',['bootstrap.py','--execute']),redirect_stdout(output),redirect_stderr(output)]
+    def refresh(diagnostic=None):
+     error=bootstrap.AptRefreshError(b'E: Could not get lock DUMMY_PRIVATE_APT_PARTIAL_FAILURE','exit',100)
+     if diagnostic:
+      for phase in error.phases:diagnostic(phase)
+     raise error
+    contexts=[patch.object(bootstrap,'STATE',state),patch.object(bootstrap,'SESSION',session),patch.object(bootstrap,'Path',side_effect=vm_path),patch.object(bootstrap,'root_file',side_effect=lambda p:Path(p)),patch.object(bootstrap,'host'),patch.object(bootstrap,'verify_metadata',side_effect=metadata),patch.object(bootstrap,'apt_sources'),patch.object(bootstrap,'validate_apt_sources'),patch.object(bootstrap,'refresh_indexes',side_effect=refresh),patch.object(bootstrap,'run',side_effect=lambda args,timeout=1200:commands.append(args)),patch.object(bootstrap,'emit',side_effect=emit),patch.object(bootstrap.fcntl,'flock'),patch.object(bootstrap.time,'time',return_value=now),patch.object(bootstrap.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='')),patch.object(sys,'argv',['bootstrap.py','--execute']),redirect_stdout(output),redirect_stderr(output)]
     with ExitStack() as stack:
      for context in contexts:stack.enter_context(context)
      install=stack.enter_context(patch.object(bootstrap,'install'))

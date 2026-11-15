@@ -8,14 +8,19 @@ import json,os,stat,time
 from host_policy import manifest_from,timestamp
 
 PREFIX='UNJAILED_HOST_EVENT '
+APT_DIAGNOSTIC_PHASES=frozenset([
+ 'apt-failure-exit-100','apt-failure-exit-other','apt-failure-signal','apt-failure-timeout','apt-failure-deadline','apt-failure-output-bound','apt-failure-unknown',
+ 'apt-error-dns','apt-error-network','apt-error-tls','apt-error-signature','apt-error-integrity','apt-error-lock','apt-error-repository','apt-error-multiple','apt-error-unknown',
+ 'apt-repo-ubuntu','apt-repo-cuda','apt-repo-toolkit','apt-repo-docker','apt-repo-multiple','apt-repo-unknown'])
 PHASES={
- 'bootstrap':frozenset(['new','metadata-review','metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','installing','package-resolve','package-download','package-verify','package-install','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']),
+ 'bootstrap':frozenset(['new','metadata-review','metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','installing','package-resolve','package-download','package-verify','package-install','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started'])|APT_DIAGNOSTIC_PHASES,
  'runtime':frozenset(['preparing','image-pull','connector-install','host-boundary-probe','sealing','container-create','native-boundary','model-free-preflight','awaiting-provider-firewall-permit','model-starting','ready'])}
 DEVICES=('/dev/console','/dev/ttyS0','/dev/tty1')
 
 def event(m,component,phase,status,now=None):
  manifest_from(m)
  if component not in PHASES or phase not in PHASES[component] or status not in ('running','failed','passed'):raise ValueError('Unknown host diagnostic stage')
+ if phase in APT_DIAGNOSTIC_PHASES and status!='failed':raise ValueError('APT failure indicators cannot report success')
  now=time.time() if now is None else now
  if type(now) not in (int,float) or not timestamp(m['createdAt'])<=now<=timestamp(m['deadlineUTC']):raise ValueError('Host diagnostic outside session')
  value={'version':1,'sessionId':m['sessionId'],'nonce':m['nonce'],'component':component,'phase':phase,'status':status,'at':round(now*1000),'deadline':round(timestamp(m['deadlineUTC'])*1000)}
