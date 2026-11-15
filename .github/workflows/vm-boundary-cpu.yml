@@ -42,6 +42,10 @@ jobs:
           env -i PATH=/usr/bin:/bin python3 -I -B vm/test_gateway.py
           env -i PATH=/usr/bin:/bin python3 -I -B vm/test_prepared_host.py
           env -i PATH=/usr/bin:/bin python3 -I -B vm/test_cuda_compat.py
+          env -i PATH=/usr/bin:/bin python3 -I -B vm/test_prepared_credential_boot.py
+          env -i PATH=/usr/bin:/bin python3 -I -B vm/test_prepared_bootstrap.py
+          env -i PATH=/usr/bin:/bin python3 -I -B vm/test_prepared_runtime.py
+          env -i PATH=/usr/bin:/bin python3 -I -B vm/test_review_prepared_host.py
           env -i PATH=/usr/bin:/bin python3 -I -B vm/test_host_inventory_probe.py
           bash -n vm/linux_fixture.sh
           sh -n vm/attach_model_network.sh

@@ -1,0 +1,6 @@
+**
+!vm/
+!vm/cuda_compat.py
+!vm/cuda-compat.lock.json
+!vm/prepared_credential_boot.py
+!vm/Dockerfile.prepared-inference

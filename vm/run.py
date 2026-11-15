@@ -6,7 +6,7 @@ already exist. Every startup stage consumes the original session deadline.
 import fcntl,hashlib,json,os,re,signal,socket,stat,subprocess,sys,threading,time,urllib.request
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from host_policy import Refused,root_file,manifest_from,atomic,timestamp,docker_arguments
+from host_policy import Refused,root_file,manifest_from,atomic,timestamp,docker_arguments,canonical
 from attestation import context_digest,protected
 from gateway import config_from,strict_json,protected_group_file,MODEL,REVISION
 from egress_probe import EXPECTED_CHECKS
@@ -14,8 +14,14 @@ from console_diagnostics import emit
 HERE=Path(__file__).resolve().parent
 ENV={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'}
 STATE=Path('/var/lib/unjailed/runtime.json')
+PREPARED_PROFILE=Path('/etc/unjailed/prepared-host-profile.json')
 
-def bundle_verified(config):
+def prepared_profile():
+ if not PREPARED_PROFILE.exists() and not PREPARED_PROFILE.is_symlink():return None
+ from prepared_bootstrap import profile_from
+ return profile_from(strict_json(root_file(PREPARED_PROFILE).read_bytes()))
+
+def bundle_verified(config,prepared_profile=None):
  marker=json.loads(root_file('/var/lib/unjailed/bootstrap-bundle.json').read_text())
  if not isinstance(marker,dict) or set(marker)!={'version','sha256','files'} or marker['version']!=1 or marker['sha256']!=config['bootstrapBundleSha256'] or not isinstance(marker['files'],dict):raise Refused('Runtime source bundle not pinned')
  actual={str(p.relative_to(HERE)) for p in HERE.rglob('*') if p.is_file()}
@@ -24,7 +30,23 @@ def bundle_verified(config):
   if not re.fullmatch('[0-9a-f]{64}',digest) or name.startswith('/') or '..' in Path(name).parts:raise Refused('Invalid bundle file inventory')
   p=HERE/name;info=p.lstat()
   if stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022 or hashlib.sha256(p.read_bytes()).hexdigest()!=digest:raise Refused('Installed runtime source changed')
- if hashlib.sha256((HERE/'packages.lock.json').read_bytes()).hexdigest()!=config['bootstrapLockSha256']:raise Refused('Bootstrap package lock changed')
+ lock_name='packages.lock.json'
+ if prepared_profile is not None:
+  from prepared_bootstrap import profile_from
+  from prepared_host import _reviewed_lock
+  selected=profile_from(prepared_profile);lock_name='prepared-host.lock.json'
+  if selected['hostLockSHA256']!=config['bootstrapLockSha256']:raise Refused('Prepared host lock differs from runtime pin')
+  _reviewed_lock((HERE/lock_name).read_bytes(),selected['hostLockSHA256'])
+ if hashlib.sha256((HERE/lock_name).read_bytes()).hexdigest()!=config['bootstrapLockSha256']:raise Refused('Bootstrap package lock changed')
+ return True
+
+def bootstrap_verified(manifest,state,prepared_profile=None):
+ if state['phase']!='host-ready-model-not-started' or state['deadlineUTC']!=manifest['deadlineUTC']:raise Refused('Native driver bootstrap incomplete')
+ if prepared_profile is not None:
+  from prepared_bootstrap import profile_from
+  profile=profile_from(prepared_profile)
+  if state.get('hostProfile')!=profile['mode'] or state.get('hostLockSHA256')!=profile['hostLockSHA256'] or state.get('manifestSHA256')!=hashlib.sha256(canonical(manifest)).hexdigest():raise Refused('Prepared bootstrap does not bind this session and host lock')
+ elif 'hostProfile'in state or 'hostLockSHA256'in state:raise Refused('Prepared bootstrap requires its explicit root profile')
  return True
 
 def install_cloudflared():
@@ -108,8 +130,8 @@ def main():
    c=config_from(strict_json(protected_group_file('/etc/unjailed/gateway.json').read_bytes()))
    if any(c[key]!=m[key] for key in ['sessionId','nonce','createdAt','deadlineUTC']) or c['servingImage']!=m['image']:raise Refused('Gateway config differs from allocation')
    boot=json.loads(root_file('/var/lib/unjailed/bootstrap.json').read_text())
-   if boot['phase']!='host-ready-model-not-started' or boot['deadlineUTC']!=m['deadlineUTC']:raise Refused('Native driver bootstrap incomplete')
-   bundle_verified(c);remaining()
+   selected_profile=prepared_profile();bootstrap_verified(m,boot,selected_profile)
+   bundle_verified(c,selected_profile);remaining()
    # Before sealing, only reviewed image/binary downloads. All startup costs
    # still consume the original deadline and the independent external guards.
    save('image-pull');run(['docker','pull',m['image']],seconds=900)

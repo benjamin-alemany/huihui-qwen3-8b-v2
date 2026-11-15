@@ -10,6 +10,11 @@ on:
         required: false
         default: ''
         type: string
+      runtime_profile:
+        description: Explicit prepared-host overlay; the original VM image remains the default
+        required: false
+        default: vm-inference-v1
+        type: string
 permissions:
   contents: read
   actions: read
@@ -33,6 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CPU_RUN_ID: ${{ inputs.cpu_run_id }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
         run: |
           set -euo pipefail
           [[ "$CPU_RUN_ID" =~ ^[0-9]{1,20}$ ]]
@@ -41,6 +47,7 @@ jobs:
             --jq '.jobs[]|{name,status,conclusion}' > "$RUNNER_TEMP/cpu-jobs.ndjson"
           python3 - <<'PY'
           import json,os,subprocess
+          assert os.environ['RUNTIME_PROFILE'] in ['vm-inference-v1','vm-inference-prepared-r570-v1']
           proof=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-proof.json'))
           assert proof['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
           assert proof['path']=='.github/workflows/chat-boundary-cpu.yml'
@@ -67,21 +74,29 @@ jobs:
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Publish reviewed overlay reusing exact existing model layers
         id: publish
+        env:
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
         run: |
           set -euo pipefail
+          case "$RUNTIME_PROFILE" in
+            vm-inference-v1) dockerfile='vm/Dockerfile.inference'; image_tag='vm-chat' ;;
+            vm-inference-prepared-r570-v1) dockerfile='vm/Dockerfile.prepared-inference'; image_tag='vm-prepared-chat' ;;
+            *) exit 1 ;;
+          esac
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2"
           docker buildx build --platform linux/amd64 --provenance=false --network=none --push \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --label 'work.unjailed.profile=vm-inference-v1' \
+            --label "work.unjailed.profile=$RUNTIME_PROFILE" \
             --metadata-file "$RUNNER_TEMP/vm-image.json" \
-            --tag "$image:vm-chat-$GITHUB_SHA" -f vm/Dockerfile.inference .
+            --tag "$image:$image_tag-$GITHUB_SHA" -f "$dockerfile" .
           python3 - <<'PY'
           import json,os,re
           digest=json.load(open(os.environ['RUNNER_TEMP']+'/vm-image.json'))['containerimage.digest']
           assert re.fullmatch('sha256:[0-9a-f]{64}',digest)
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('digest='+digest+'\n')
           print('VM_CHAT_CANDIDATE_DIGEST='+digest)
+          print('VM_CHAT_CANDIDATE_PROFILE='+os.environ['RUNTIME_PROFILE'])
           print('Candidate only: no VM, model initialization, deployment or release-pin change.')
           PY
       - name: Remove temporary registry login and builder
@@ -106,6 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CPU_RUN_ID: ${{ inputs.cpu_run_id }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
         run: |
           set -euo pipefail
           [[ "$CPU_RUN_ID" =~ ^[0-9]{1,20}$ ]]
@@ -114,6 +130,7 @@ jobs:
             --jq '.jobs[]|{name,status,conclusion}' > "$RUNNER_TEMP/cpu-jobs.ndjson"
           python3 - <<'PY'
           import json,os,subprocess
+          assert os.environ['RUNTIME_PROFILE'] in ['vm-inference-v1','vm-inference-prepared-r570-v1']
           proof=json.load(open(os.environ['RUNNER_TEMP']+'/cpu-proof.json'))
           assert proof['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
           assert proof['path']=='.github/workflows/chat-boundary-cpu.yml'
@@ -138,6 +155,7 @@ jobs:
       - name: Check published code and unchanged offline cache without GPU or network
         env:
           CANDIDATE_DIGEST: ${{ inputs.candidate_digest || needs.build.outputs.digest }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
         run: |
           set -euo pipefail
           [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -145,13 +163,16 @@ jobs:
           docker pull "$image"
           docker image inspect "$image" --format '{{json .Config.Labels}}' > "$RUNNER_TEMP/image-labels.json"
           docker image inspect "$image" --format '{{.Size}}' > "$RUNNER_TEMP/image-size.txt"
-          docker image inspect "$image" --format '{{json .Config.Entrypoint}}' | \
-            python3 -c 'import json,sys; assert json.load(sys.stdin)==["python3","-I","-S","-B","/opt/qwen/credential_boot.py"]'
+          docker image inspect "$image" --format '{{json .Config.Entrypoint}}' > "$RUNNER_TEMP/entrypoint.json"
           python3 - <<'PY'
           import hashlib,json,os,re,shutil,subprocess
           labels=json.load(open(os.environ['RUNNER_TEMP']+'/image-labels.json'))
           assert labels['org.opencontainers.image.source']=='https://github.com/'+os.environ['GITHUB_REPOSITORY']
-          assert labels['work.unjailed.profile']=='vm-inference-v1'
+          profile=os.environ['RUNTIME_PROFILE']
+          assert profile in ['vm-inference-v1','vm-inference-prepared-r570-v1']
+          assert labels['work.unjailed.profile']==profile
+          entry='prepared_credential_boot.py' if profile=='vm-inference-prepared-r570-v1' else 'credential_boot.py'
+          assert json.load(open(os.environ['RUNNER_TEMP']+'/entrypoint.json'))==['python3','-I','-S','-B','/opt/qwen/'+entry]
           source=labels['org.opencontainers.image.revision'];assert re.fullmatch('[0-9a-f]{40}',source)
           subprocess.run(['git','merge-base','--is-ancestor',source,'HEAD'],check=True)
           subprocess.run(['git','diff','--exit-code',source,'HEAD','--','vm','chat/credential_boot.py','chat/credential_boundary.py','chat/offline_cache.py','chat/chat_server.py','start.py'],check=True)
@@ -159,11 +180,19 @@ jobs:
           print('VM_ARTIFACT_UNCOMPRESSED_IMAGE_BYTES='+open(os.environ['RUNNER_TEMP']+'/image-size.txt').read().strip())
           print('VM_ARTIFACT_RUNNER_FREE_BYTES_AFTER_PULL='+str(shutil.disk_usage('/').free))
           mapping={'vm/boot.py':'inference_only.py','vm/model_boot.py':'model_boot.py','vm/preflight.py':'preflight.py','vm/egress_probe.py':'egress_probe.py','vm/attestation.py':'attestation.py','vm/inference_policy.py':'inference_policy.py','vm/image_setup.py':'image_setup.py','vm/host_policy.py':'host_policy.py','chat/credential_boot.py':'credential_boot.py','chat/credential_boundary.py':'credential_boundary.py','chat/offline_cache.py':'offline_cache.py','chat/chat_server.py':'chat_server.py','start.py':'start.py'}
+          if profile=='vm-inference-prepared-r570-v1':
+              mapping.update({'vm/prepared_credential_boot.py':'prepared_credential_boot.py','vm/cuda_compat.py':'cuda_compat.py','vm/cuda-compat.lock.json':'cuda-compat.lock.json'})
           with open(os.environ['RUNNER_TEMP']+'/code-hashes.json','w') as f:json.dump({target:hashlib.sha256(open(source,'rb').read()).hexdigest() for source,target in mapping.items()},f)
           PY
+          if [[ "$RUNTIME_PROFILE" == 'vm-inference-prepared-r570-v1' ]]; then
+            compat_args=(-e 'LD_LIBRARY_PATH=/usr/local/cuda-13.0/compat:/usr/local/cuda-13.0/targets/x86_64-linux/lib')
+          else
+            compat_args=()
+          fi
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m \
             --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 6g --pids-limit 128 \
             -e VLLM_ENABLE_V1_MULTIPROCESSING=0 \
+            -e "ARTIFACT_RUNTIME_PROFILE=$RUNTIME_PROFILE" "${compat_args[@]}" \
             --mount "type=bind,source=$RUNNER_TEMP/code-hashes.json,target=/expected-code-hashes.json,readonly" \
             --entrypoint python3 "$image" -I -B -c '
           import hashlib,json,os,sys
@@ -171,6 +200,14 @@ jobs:
           for name,digest in json.load(open("/expected-code-hashes.json")).items():
               assert hashlib.sha256(open("/opt/qwen/"+name,"rb").read()).hexdigest()==digest
           print("VM_ARTIFACT_ALL_COPIED_CODE_HASHES_VERIFIED")
+          if os.environ["ARTIFACT_RUNTIME_PROFILE"]=="vm-inference-prepared-r570-v1":
+              import cuda_compat,prepared_credential_boot
+              raw=open("/opt/qwen/cuda-compat.lock.json","rb").read()
+              lock=prepared_credential_boot.reviewed_lock(raw)
+              loader_path=cuda_compat.verify_compatibility(lock)
+              assert os.environ["LD_LIBRARY_PATH"]==loader_path
+              assert "torch" not in sys.modules and "vllm" not in sys.modules
+              print("PREPARED_VM_ARTIFACT_COMPATIBILITY_PACKAGE_HASHES_AND_FIXED_LOADER_VERIFIED")
           import inference_policy,offline_cache,chat_server
           inference_policy.install()
           path=offline_cache.verify_cache()

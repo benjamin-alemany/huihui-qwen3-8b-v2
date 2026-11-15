@@ -18,6 +18,8 @@ NVIDIA_FILE=re.compile(r'^/usr/lib/(?:x86_64-linux-gnu|x86_64-linux-gnu/nvidia/c
 NVIDIA_BINARY={'/usr/bin/nvidia-cuda-mps-control','/usr/bin/nvidia-cuda-mps-server'}
 DEVICE=re.compile(r'^/dev/nvidia(?:[0-9]+|ctl|uvm|uvm-tools|caps/nvidia-cap[0-9]+)$')
 GPU_PROC=re.compile(r'^/proc/driver/nvidia/gpus/([0-9a-fA-F]{4,8}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])$')
+HERE=Path(__file__).resolve().parent
+PREPARED_PROFILE=Path('/etc/unjailed/prepared-host-profile.json')
 
 def unescape(value):
  return re.sub(r'\\(040|011|012|134)',lambda m:chr(int(m[1],8)),value)
@@ -43,7 +45,44 @@ def visible(root,target):
 def reviewed_gpu_file(name,driver_version):
  return bool(NVIDIA_FILE.fullmatch(name) or name in NVIDIA_BINARY or re.fullmatch(r'/usr/lib/firmware/nvidia/'+re.escape(driver_version)+r'/gsp_[a-z0-9_]+\.bin',name))
 
-def installed_gpu_files():
+def prepared_profile():
+ # Explicit root configuration selects the new profile; absence preserves the
+ # exact legacy path. A malformed/missing prepared lock never falls back.
+ if not PREPARED_PROFILE.exists() and not PREPARED_PROFILE.is_symlink():return None
+ from prepared_bootstrap import profile_from,strict_json
+ return profile_from(strict_json(root_file(PREPARED_PROFILE).read_bytes()))
+
+def _prepared_gpu_files(profile):
+ from prepared_bootstrap import profile_from,source_bytes
+ from prepared_host import _reviewed_lock
+ profile=profile_from(profile)
+ lock=_reviewed_lock(source_bytes(HERE/'prepared-host.lock.json'),profile['hostLockSHA256'])
+ inventory=lock['inventory'];packages={entry['name']:entry for entry in inventory['packages']}
+ selected=[entry for entry in inventory['files'] if reviewed_gpu_file(entry['path'],inventory['driverVersion'])]
+ if not selected:raise Refused('Reviewed prepared host compute inventory missing')
+ # Package identities/provenance and file hashes come from the source-reviewed
+ # lock, never from the container's runtime-injected mount inventory.
+ result={}
+ def add(path,digest):
+  if path in result and result[path]!=digest:raise Refused('Ambiguous prepared driver library alias')
+  result[path]=digest
+ for entry in selected:
+  path=Path(entry['path']);info=path.lstat()
+  if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022 or info.st_size!=entry['size']:raise Refused('Untrusted prepared host driver file')
+  data=path.read_bytes()
+  if len(data)!=entry['size'] or hashlib.sha256(data).hexdigest()!=entry['sha256']:raise Refused('Prepared host driver file differs from reviewed bytes')
+  add(entry['path'],entry['sha256'])
+  if NVIDIA_FILE.fullmatch(entry['path']):
+   for directory in ['/usr/lib/x86_64-linux-gnu','/usr/lib/x86_64-linux-gnu/nvidia/current']:add(directory+'/'+path.name,entry['sha256'])
+ for name in sorted({entry['package'] for entry in selected}):
+  if run(['dpkg-query','--show','--showformat=${Version}',name])!=packages[name]['version'] or run(['dpkg','--verify',name]):raise Refused('Prepared host compute package changed')
+ return result
+
+def installed_gpu_files(prepared_profile=None):
+ if prepared_profile is not None:return _prepared_gpu_files(prepared_profile)
+ return _legacy_installed_gpu_files()
+
+def _legacy_installed_gpu_files():
  # Only installed files from the exact pinned compute package, not filenames
  # observed inside the injected container. dpkg metadata came from hashed .debs.
  result={}
@@ -202,7 +241,7 @@ def main():
       if os.waitpid(child,0)[1]!=0:raise Refused('NVIDIA metadata readonly seal refused')
      finally:os.close(namespace)
     print('SCOPED_NVIDIA_METADATA_READONLY_SEAL_COMPLETED_NOT_NATIVE_ACCEPTANCE');return
-   verify_mount_inventory(mounts_from(read('mountinfo')),root,installed_gpu_files(),directory);verify_sockets(root)
+   verify_mount_inventory(mounts_from(read('mountinfo')),root,installed_gpu_files(prepared_profile()),directory);verify_sockets(root)
    for forbidden in ['/run/nvidia-persistenced','/tmp/nvidia-mps','/run/docker.sock','/run/containerd/containerd.sock']:
     if (Path(root)/forbidden.lstrip('/')).exists():raise Refused('Host IPC/control surface visible')
   finally:os.close(root_fd)

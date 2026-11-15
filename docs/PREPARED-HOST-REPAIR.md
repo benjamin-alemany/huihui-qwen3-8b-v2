@@ -41,12 +41,16 @@ stages remain available without raw error text. Capture is followed promptly
 by Stop/delete and fresh inventory/resource cleanup evidence.
 
 The old campaign used all three allocations and expired at 19:14:25 UTC on
-November 15. Its remaining dollars are not unused allocations. This code
-does not renew it, reset counters, create a new grant or buy provider credits.
-The recorded aggregate test cap remains $5; the latest retained upper bound is
-$1.9638881734 spent and $3.0361118266 remaining. Another paid test requires a
-fresh bounded grant preserving that history. The A100 ceilings remain
-$1.36/hour and $0.85 per allocation, including the existing cleanup reserve.
+November 15. Its history remains immutable. The owner authorized a separate
+24-hour campaign at 21:01:30 UTC on November 15: at most two additional A100
+allocations, three creation requests and ten Start/preflight attempts, one VM
+at a time. The first allocation may collect keyless host inventory only; the
+second may test CUDA, isolation and private browser chat after provenance review.
+The new incremental ceiling is $1.70 and is enforced durably alongside the
+unchanged cumulative $5 cap. The retained baseline is $1.9638881734 spent and
+$3.0361118266 remaining. The A100 ceilings remain $1.36/hour and $0.85 per
+allocation, including the existing cleanup reserve. No credits, auto-pay,
+storage charges or ordinary-use allowance were authorized.
 
 ## Gate after inventory
 
