@@ -12,7 +12,7 @@
     "runtimeProfile": "host-inventory-v1",
     "bootstrapLockSha256": "409e1012a400c07f3aa39104eac8527d9d77d23204d0bcb01f6927e000ce5afd",
     "bootstrapBundleSha256": "409e1012a400c07f3aa39104eac8527d9d77d23204d0bcb01f6927e000ce5afd",
-    "bootstrapSourceCommit": "0e522c1a2bc4e9cc0430aa4c7aa4299ea144f32a",
+    "bootstrapSourceCommit": "1054774eedd79fead9e3bdef2c96547022cf4575",
     "bootstrapBundleSize": 42857,
     "runtimeOrchestrator": "host-inventory-v1"
   },
