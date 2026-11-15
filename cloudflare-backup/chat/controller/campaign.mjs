@@ -5,12 +5,18 @@ const PROFILES=Object.freeze([
  Object.freeze({flavor:'n3-RTX-A6000x1',gpu:'RTX-A6000',hourly:.507,total:.35}),
  Object.freeze({flavor:'n3-A100x1',gpu:'A100-80G-PCIe',hourly:1.36,total:.85})
 ]);
-export const CAMPAIGN_ERRORS=Object.freeze(['CAMPAIGN_REQUIRED','CAMPAIGN_INVALID','CAMPAIGN_CHANGED','CAMPAIGN_STATE_INVALID','CAMPAIGN_NOT_STARTED','CAMPAIGN_EXPIRED','CAMPAIGN_START_LIMIT','CAMPAIGN_POST_LIMIT','CAMPAIGN_ALLOCATION_LIMIT','CAMPAIGN_UNRESOLVED_ATTEMPT','CAMPAIGN_PROFILE_MISMATCH','CAMPAIGN_ATTEMPT_MISMATCH','CAMPAIGN_BUDGET_MISMATCH','CAMPAIGN_OUTCOME_UNCONFIRMED']);
+export const CAMPAIGN_ERRORS=Object.freeze(['CAMPAIGN_REQUIRED','CAMPAIGN_INVALID','CAMPAIGN_CHANGED','CAMPAIGN_STATE_INVALID','CAMPAIGN_NOT_STARTED','CAMPAIGN_EXPIRED','CAMPAIGN_START_LIMIT','CAMPAIGN_POST_LIMIT','CAMPAIGN_ALLOCATION_LIMIT','CAMPAIGN_UNRESOLVED_ATTEMPT','CAMPAIGN_PROFILE_MISMATCH','CAMPAIGN_ATTEMPT_MISMATCH','CAMPAIGN_BUDGET_MISMATCH','CAMPAIGN_SPEND_BASELINE_MISMATCH','CAMPAIGN_SPEND_LIMIT','CAMPAIGN_OUTCOME_UNCONFIRMED']);
 const refuse=code=>{throw new SessionError(code,409);};
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 function policyFrom(p){
- if(!p||Array.isArray(p)||Object.keys(p).sort().join()!=='capUSD,expiresAt,id,maxAllocations,maxPosts,maxStarts,validFrom,version'||p.version!==1||!UUID.test(p.id??'')||!Number.isSafeInteger(p.validFrom)||p.validFrom<0||!Number.isSafeInteger(p.expiresAt)||p.expiresAt<=p.validFrom||p.expiresAt-p.validFrom>DAY||!Number.isInteger(p.maxStarts)||p.maxStarts<1||p.maxStarts>20||!Number.isInteger(p.maxPosts)||p.maxPosts<1||p.maxPosts>5||!Number.isInteger(p.maxAllocations)||p.maxAllocations<1||p.maxAllocations>3||p.capUSD!==5)refuse('CAMPAIGN_INVALID');
- return {version:1,id:p.id,validFrom:p.validFrom,expiresAt:p.expiresAt,maxStarts:p.maxStarts,maxPosts:p.maxPosts,maxAllocations:p.maxAllocations,capUSD:5};
+ const extended=!!p&&(Object.hasOwn(p,'spentBaselineUnits')||Object.hasOwn(p,'maximumAdditionalSpendUnits'));
+ const fields=['capUSD','expiresAt','id','maxAllocations','maxPosts','maxStarts','validFrom','version',...(extended?['spentBaselineUnits','maximumAdditionalSpendUnits']:[])].sort().join();
+ if(!p||Array.isArray(p)||Object.keys(p).sort().join()!==fields||p.version!==1||!UUID.test(p.id??'')||!Number.isSafeInteger(p.validFrom)||p.validFrom<0||!Number.isSafeInteger(p.expiresAt)||p.expiresAt<=p.validFrom||p.expiresAt-p.validFrom>DAY||!Number.isInteger(p.maxStarts)||p.maxStarts<1||p.maxStarts>20||!Number.isInteger(p.maxPosts)||p.maxPosts<1||p.maxPosts>5||!Number.isInteger(p.maxAllocations)||p.maxAllocations<1||p.maxAllocations>3||p.capUSD!==5)refuse('CAMPAIGN_INVALID');
+ if(extended&&(!Number.isSafeInteger(p.spentBaselineUnits)||p.spentBaselineUnits<0||!Number.isSafeInteger(p.maximumAdditionalSpendUnits)||p.maximumAdditionalSpendUnits<=0||!Number.isSafeInteger(p.spentBaselineUnits+p.maximumAdditionalSpendUnits)||p.spentBaselineUnits+p.maximumAdditionalSpendUnits>5*SCALE))refuse('CAMPAIGN_INVALID');
+ const policy={version:1,id:p.id,validFrom:p.validFrom,expiresAt:p.expiresAt,maxStarts:p.maxStarts,maxPosts:p.maxPosts,maxAllocations:p.maxAllocations,capUSD:5};
+ // Historical policies retain their exact schema and canonical binding. A new
+ // grant supplies this pair explicitly; no live balance becomes a baseline.
+ return extended?{...policy,spentBaselineUnits:p.spentBaselineUnits,maximumAdditionalSpendUnits:p.maximumAdditionalSpendUnits}:policy;
 }
 export function parseTestCampaign(raw){
  if(raw===undefined||raw==='')return null;
@@ -35,10 +41,24 @@ export function reconcileCampaign(record,policy,required=false){
  }catch(e){return {ready:false,configured:!!policy,code:CAMPAIGN_ERRORS.includes(e?.code)?e.code:'CAMPAIGN_INVALID'};}
 }
 function temporal(policy,now){if(!Number.isSafeInteger(now))refuse('CAMPAIGN_INVALID');if(now<policy.validFrom)refuse('CAMPAIGN_NOT_STARTED');if(now>=policy.expiresAt)refuse('CAMPAIGN_EXPIRED');}
+function quoteHold(quote){
+ if(!Number.isSafeInteger(quote?.holdUnits)||quote.holdUnits<=0||quote.maximumUSD!==quote.holdUnits/SCALE)refuse('CAMPAIGN_BUDGET_MISMATCH');
+ return quote.holdUnits;
+}
+function spendChecked(record,policy,{additionalHoldUnits=0,requireAdditional=false,session}={}){
+ if(!Object.hasOwn(policy,'spentBaselineUnits'))return;
+ const ledger=record.ledger;
+ if(!ledger||!['cap','spent','held'].every(key=>Number.isSafeInteger(ledger[key])&&ledger[key]>=0)||ledger.cap>policy.capUSD*SCALE||!Number.isSafeInteger(ledger.spent+ledger.held)||!Number.isSafeInteger(additionalHoldUnits)||additionalHoldUnits<0)refuse('CAMPAIGN_BUDGET_MISMATCH');
+ if(ledger.spent<policy.spentBaselineUnits)refuse('CAMPAIGN_SPEND_BASELINE_MISMATCH');
+ if(session&&ledger.held<quoteHold(session.quote))refuse('CAMPAIGN_BUDGET_MISMATCH');
+ const remaining=policy.spentBaselineUnits+policy.maximumAdditionalSpendUnits-ledger.spent-ledger.held;
+ if(remaining<additionalHoldUnits||requireAdditional&&remaining<=0)refuse('CAMPAIGN_SPEND_LIMIT');
+}
 function gate(record,policy,required,now,{start=false}={}){
  const readiness=reconcileCampaign(record,policy,required);if(!readiness.ready)refuse(readiness.code);if(!policy)return null;
  const p=policyFrom(policy),state=stateFor(record,p.id);temporal(p,now);
  if(!Number.isSafeInteger(record.ledger?.cap)||record.ledger.cap>p.capUSD*SCALE)refuse('CAMPAIGN_BUDGET_MISMATCH');
+ spendChecked(record,p,{requireAdditional:start});
  if(start&&state.startsUsed>=p.maxStarts)refuse('CAMPAIGN_START_LIMIT');
  if(state.postsUsed>=p.maxPosts)refuse('CAMPAIGN_POST_LIMIT');
  if(state.allocationsUsed+state.candidates>=p.maxAllocations)refuse('CAMPAIGN_ALLOCATION_LIMIT');
@@ -49,10 +69,22 @@ function profileChecked(session,target){
  const p=PROFILES.find(p=>p.flavor===target?.flavorName),q=session.quote;
  if(!p||target.region!=='CANADA-1'||target.maximumHourlyUSD>p.hourly||q?.provider!=='hyperstack'||q.gpu!==p.gpu||q.minutes!==30||!Number.isFinite(q.totalHourlyUSD)||q.totalHourlyUSD<=0||q.totalHourlyUSD>p.hourly||!Number.isFinite(q.maximumUSD)||q.maximumUSD<=0||q.maximumUSD>p.total)refuse('CAMPAIGN_PROFILE_MISMATCH');return p;
 }
+// Quote does not reserve or consume anything. The engine calls this inside its
+// quote transaction before saving the prospective quote. Historical campaigns
+// keep their earlier free-quote behavior; new bounded grants check the full hold.
+export function campaignQuoteReady(record,{policy,required=false,target,quote,now}){
+ const p=policy?policyFrom(policy):null;if(!p||!Object.hasOwn(p,'spentBaselineUnits'))return;
+ const state=gate(record,p,required,now,{start:true});if(!state)return;
+ profileChecked({quote},target);spendChecked(record,p,{additionalHoldUnits:quoteHold(quote)});
+}
 export function campaignStart(record,session,{policy,required=false,target,now}){
  const state=gate(record,policy,required,now,{start:true});if(!state)return;
  if(session.budgetKind!=='test'||session.quote.campaignBinding!==campaignBinding(policy))refuse('CAMPAIGN_CHANGED');
- const profile=profileChecked(session,target);session.campaignId=state.policy.id;
+ const profile=profileChecked(session,target);
+ // The engine adds this quote's hold immediately AFTER this callback. Count it
+ // prospectively here; later barriers inspect the already-held amount once.
+ if(Object.hasOwn(state.policy,'spentBaselineUnits'))spendChecked(record,state.policy,{additionalHoldUnits:quoteHold(session.quote)});
+ session.campaignId=state.policy.id;
  state.attempts.push({sessionId:session.id,childApprovalId:session.approval,quoteId:session.quoteId,profile:profile.flavor,startedAt:now,postClaimed:false,closed:false,allocationIds:[]});recount(state);
 }
 function attemptFor(state,session){const a=state.attempts.find(a=>a.sessionId===session.id);if(!a||a.childApprovalId!==session.approval||a.quoteId!==session.quoteId)refuse('CAMPAIGN_ATTEMPT_MISMATCH');return a;}
@@ -60,6 +92,7 @@ export function campaignBeforeCreate(record,session,{policy,required=false,targe
  const state=gate(record,policy,required,now);if(!state){if(session.campaignId)refuse('CAMPAIGN_CHANGED');return;}
  if(session.campaignId!==state.policy.id||session.quote.campaignBinding!==campaignBinding(policy))refuse('CAMPAIGN_CHANGED');
  const profile=profileChecked(session,target),attempt=attemptFor(state,session);
+ spendChecked(record,state.policy,{session});
  if(attempt.closed||attempt.postClaimed||attempt.profile!==profile.flavor)refuse('CAMPAIGN_ATTEMPT_MISMATCH');
  attempt.postClaimed=true;attempt.postClaimedAt=now;recount(state);
 }
@@ -69,6 +102,7 @@ export function campaignPostReady(record,session,{policy,required=false,target,n
  if(!policy){if(required||session?.campaignId)refuse('CAMPAIGN_REQUIRED');return null;}
  const p=policyFrom(policy),state=stateFor(record,p.id);if(!same(state.policy,p)||session?.campaignId!==p.id||record.session?.id!==session.id||record.campaignReconciliation?.id!==p.id)refuse('CAMPAIGN_CHANGED');
  temporal(p,now);profileChecked(session,target);const attempt=attemptFor(state,session);
+ spendChecked(record,p,{session});
  if(session.approval!==childApprovalId||session.createAttempted!==true||session.stopRequested!==false||session.phase!=='reconciling'||!attempt.postClaimed||attempt.closed||state.postsUsed>p.maxPosts||state.allocationsUsed+state.candidates>p.maxAllocations)refuse('CAMPAIGN_ATTEMPT_MISMATCH');
  for(const other of Object.values(record.testCampaigns??{})){stateChecked(other);if(other.attempts.some(a=>a.postClaimed&&!a.closed&&a.sessionId!==session.id))refuse('CAMPAIGN_UNRESOLVED_ATTEMPT');}
  return {expiresAt:p.expiresAt};
@@ -95,5 +129,6 @@ export function campaignFinish(record,session,phase){
 export function campaignView(record,policy,required,now){
  if(!policy&&!required)return null;
  let state,p,code=null;try{if(!policy)refuse('CAMPAIGN_REQUIRED');p=policyFrom(policy);state=stateFor(record,p.id);gate(record,policy,required,now,{start:true});}catch(e){code=CAMPAIGN_ERRORS.includes(e?.code)?e.code:'CAMPAIGN_INVALID';}
- return {ready:code===null,code,id:p?.id??null,validFrom:p?new Date(p.validFrom).toISOString():null,expiresAt:p?new Date(p.expiresAt).toISOString():null,maxStarts:p?.maxStarts??null,maxPosts:p?.maxPosts??null,maxAllocations:p?.maxAllocations??null,startsUsed:state?.startsUsed??null,postsUsed:state?.postsUsed??null,allocationsUsed:state?.allocationsUsed??null,candidates:state?.candidates??null};
+ const ledger=record?.ledger,spendView=p&&Object.hasOwn(p,'spentBaselineUnits')?{spentBaselineUSD:p.spentBaselineUnits/SCALE,maximumAdditionalSpendUSD:p.maximumAdditionalSpendUnits/SCALE,additionalSpentUpperUSD:Number.isSafeInteger(ledger?.spent)?Math.max(0,ledger.spent-p.spentBaselineUnits)/SCALE:null,additionalReservedUSD:Number.isSafeInteger(ledger?.held)?ledger.held/SCALE:null,additionalRemainingUSD:Number.isSafeInteger(ledger?.spent)&&Number.isSafeInteger(ledger?.held)?Math.max(0,p.spentBaselineUnits+p.maximumAdditionalSpendUnits-ledger.spent-ledger.held)/SCALE:null}:{};
+ return {ready:code===null,code,id:p?.id??null,validFrom:p?new Date(p.validFrom).toISOString():null,expiresAt:p?new Date(p.expiresAt).toISOString():null,maxStarts:p?.maxStarts??null,maxPosts:p?.maxPosts??null,maxAllocations:p?.maxAllocations??null,startsUsed:state?.startsUsed??null,postsUsed:state?.postsUsed??null,allocationsUsed:state?.allocationsUsed??null,candidates:state?.candidates??null,...spendView};
 }
