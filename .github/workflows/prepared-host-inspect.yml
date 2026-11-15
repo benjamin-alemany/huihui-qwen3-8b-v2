@@ -1,5 +1,6 @@
 name: Inspect pinned CUDA compatibility artifact without GPU
 on:
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
