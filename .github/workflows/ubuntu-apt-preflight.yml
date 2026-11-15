@@ -36,10 +36,22 @@ jobs:
             --entrypoint /usr/bin/timeout "$image" --signal=KILL 360s \
             /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C DEBIAN_FRONTEND=noninteractive \
             /bin/sh -ceu '
+              printf "%s\n" "PUBLIC_BASE_OS_RELEASE"
+              head -c 1024 /etc/os-release
+              printf "\n%s\n" "PUBLIC_BASE_LEGACY_APT_SOURCE"
+              if test -f /etc/apt/sources.list; then head -c 1024 /etc/apt/sources.list; fi
+              printf "\n%s\n" "PUBLIC_BASE_NOBLE_APT_SOURCE"
+              if test -f /etc/apt/sources.list.d/ubuntu.sources; then head -c 4096 /etc/apt/sources.list.d/ubuntu.sources; fi
+              printf "\n%s\n" "PUBLIC_BASE_APT_SOURCE_FILENAMES"
+              find /etc/apt/sources.list.d -maxdepth 1 -type f -printf "%f\n" | head -c 1024
               grep -qx "ID=ubuntu" /etc/os-release
               grep -qx "VERSION_ID=\"24.04\"" /etc/os-release
               test -f /usr/share/keyrings/ubuntu-archive-keyring.gpg
-              test ! -s /etc/apt/sources.list
+              # The pinned image retains a comment-only migration notice here.
+              # Accept no active legacy source line, regardless of file size.
+              if test -f /etc/apt/sources.list; then
+                awk "NF && \$1 !~ /^#/ { bad=1 } END { exit bad }" /etc/apt/sources.list
+              fi
               test "$(find /etc/apt/sources.list.d -type f)" = /etc/apt/sources.list.d/ubuntu.sources
               # Preserve the pinned Noble image original sources/protocols.
               # Reject any different origin before installing minimal OS tools.
