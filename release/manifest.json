@@ -12,9 +12,9 @@
     "servingImage": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278",
     "runtimeProfile": "vm-inference-v1",
     "bootstrapLockSha256": "064b1db71d0511887d42d926ab2d9a4f4ce4df5ef2859a80c7cc26a712881177",
-    "bootstrapBundleSha256": "d3e1ba88ce53c49914c2fe7ae0bb4c71040cc99853171dc2a87ee54de1e09bd0",
-    "bootstrapSourceCommit": "83f444937f3d8ea9829835c941ed0dc69df75d05",
-    "bootstrapBundleSize": 61737,
+    "bootstrapBundleSha256": "8f4582aa967b490a69111e42cd4ce1eee803583fdd4adf587816c53a6b48c829",
+    "bootstrapSourceCommit": "7f44ef6e14429546d9bd2093149bb50a8faf9256",
+    "bootstrapBundleSize": 64218,
     "runtimeOrchestrator": "vm-run-v1"
   },
   "hosting": {
