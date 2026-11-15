@@ -5,7 +5,7 @@ on:
       approval:
         description: Requires separate owner permission to download and publicly redistribute 16.4 GB of pinned model files
         type: choice
-        options: [not-approved, approve-public-offline-image, approve-public-cuda-diagnostic, approve-public-driver-probe, approve-public-vm-image, approve-public-prepared-vm-image]
+        options: [not-approved, approve-public-offline-image, approve-public-cuda-diagnostic, approve-public-driver-probe, approve-public-vm-image]
         default: not-approved
       cpu_run_id:
         description: Successful chat-boundary-cpu run covering the selected unchanged source
@@ -164,11 +164,3 @@ jobs:
     with:
       cpu_run_id: ${{ inputs.cpu_run_id }}
       candidate_digest: ${{ inputs.diagnostic_digest }}
-
-  prepared-vm-image:
-    if: github.event.repository.visibility == 'public' && inputs.approval == 'approve-public-prepared-vm-image'
-    uses: ./.github/workflows/vm-inference-image.yml
-    with:
-      cpu_run_id: ${{ inputs.cpu_run_id }}
-      candidate_digest: ${{ inputs.diagnostic_digest }}
-      runtime_profile: vm-inference-prepared-r570-v1

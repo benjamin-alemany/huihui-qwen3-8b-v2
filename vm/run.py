@@ -49,6 +49,19 @@ def bootstrap_verified(manifest,state,prepared_profile=None):
  elif 'hostProfile'in state or 'hostLockSHA256'in state:raise Refused('Prepared bootstrap requires its explicit root profile')
  return True
 
+def model_arguments(manifest,prepared_profile=None,verified_library_path=None):
+ args=docker_arguments(manifest)
+ if prepared_profile is not None:
+  from prepared_bootstrap import profile_from
+  from compat_image import IMAGE,LIBRARY_PATH
+  profile_from(prepared_profile)
+  if manifest['image']!=IMAGE or verified_library_path!=LIBRARY_PATH:raise Refused('Prepared model requires the verified existing image compatibility path')
+  # Only an exact verified scalar is added. No verification-container mounts,
+  # public helper, lock, host environment or credential enters the model.
+  args[-1:-1]=['--env','LD_LIBRARY_PATH='+LIBRARY_PATH]
+ elif verified_library_path is not None:raise Refused('Legacy model cannot inherit a prepared compatibility path')
+ return args
+
 def install_cloudflared():
  lock=json.loads((HERE/'cloudflared.lock.json').read_text())
  if set(lock)!={'version','release','url','sha256','size'} or lock['version']!=1 or not re.fullmatch(r'https://github\.com/cloudflare/cloudflared/releases/download/[0-9]{4}\.[0-9]+\.[0-9]+/cloudflared-linux-amd64',lock['url']) or not re.fullmatch('[0-9a-f]{64}',lock['sha256']) or type(lock['size']) is not int or not 0<lock['size']<64*1024**2:raise Refused('Cloudflared asset is not pinned')
@@ -135,13 +148,17 @@ def main():
    # Before sealing, only reviewed image/binary downloads. All startup costs
    # still consume the original deadline and the independent external guards.
    save('image-pull');run(['docker','pull',m['image']],seconds=900)
+   compat_library_path=None
+   if selected_profile is not None:
+    from compat_image import verify_compat_image,process_runner
+    compat_library_path=verify_compat_image(m['image'],m,runner=run,cleanup_runner=process_runner)
    save('connector-install');install_cloudflared();remaining()
    save('host-boundary-probe');run(['/bin/bash',str(HERE/'linux_fixture.sh')],seconds=120)
    save('sealing');run(['/usr/bin/python3','-I','-B',str(HERE/'seal_boundary.py'),'--execute'])
    directory=Path('/run/unjailed');directory.chown(0,10002);directory.chmod(0o750)
    # gateway.json is root-written at install, gateway-group readable at runtime.
    config_path=Path('/etc/unjailed/gateway.json');config_path.chown(0,10002);config_path.chmod(0o640)
-   save('container-create');args=docker_arguments(m);args[1]='create';run(args)
+   save('container-create');args=model_arguments(m,selected_profile,compat_library_path);args[1]='create';run(args)
    run(['/usr/bin/python3','-I','-B',str(HERE/'native_attest.py'),'--prepare-context'])
    context=json.loads(root_file('/run/unjailed/attestations/'+m['sessionId']+'/context.json').read_text())
    run(['docker','start',name]);save('native-boundary')

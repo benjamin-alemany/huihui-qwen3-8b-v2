@@ -9,7 +9,7 @@ sys.path.insert(0,str(HERE))
 import native_attest as native
 import prepared_bootstrap
 from test_prepared_host import NativeFixture
-from host_policy import Refused,canonical
+from host_policy import Refused,canonical,docker_arguments
 spec=importlib.util.spec_from_file_location('prepared_runtime_under_test',HERE/'run.py')
 runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
 
@@ -100,5 +100,16 @@ class PreparedRuntimeTests(unittest.TestCase):
             with self.subTest(key=key),self.assertRaises(Refused):runtime.bootstrap_verified(host.session,bad,profile)
         with self.assertRaises(Refused):runtime.bootstrap_verified(host.session,state)
         self.assertTrue(runtime.bootstrap_verified(host.session,{key:state[key] for key in ['phase','deadlineUTC']}))
+    def test_prepared_model_gets_only_verified_loader_scalar_without_new_mounts(self):
+        from compat_image import IMAGE,LIBRARY_PATH
+        host=NativeFixture();host.session['image']=IMAGE
+        profile={'version':1,'mode':'prepared-host-r570-v1','hostLockSHA256':'a'*64}
+        original=docker_arguments(host.session);result=runtime.model_arguments(host.session,profile,LIBRARY_PATH)
+        self.assertEqual(result[-3:],['--env','LD_LIBRARY_PATH='+LIBRARY_PATH,IMAGE])
+        self.assertEqual(result[:-3]+result[-1:],original)
+        self.assertEqual(runtime.model_arguments(host.session),original)
+        for value in [None,'/tmp/unreviewed',LIBRARY_PATH+':/root']:
+            with self.subTest(value=value),self.assertRaises(Refused):runtime.model_arguments(host.session,profile,value)
+        with self.assertRaises(Refused):runtime.model_arguments(host.session,None,LIBRARY_PATH)
 
 if __name__=='__main__':unittest.main()

@@ -64,7 +64,13 @@ allowlist is automatically promoted to trusted source.
 
 The serving integration then skips package construction/reboot, verifies the
 prepared host, and uses only the reviewed fixed compatibility library path before
-the existing model child executes. The existing native mount/socket checks,
+the existing model child executes. It reuses the exact existing serving image;
+no new model image publication is needed. Before the model container is created,
+a restricted CPU container verifies the existing image's compatibility package
+and file hashes using two public source files. It receives no GPU or session
+credentials, has no network, and must be removed with absence confirmed before
+the supervisor passes the fixed loader path to the model. The model receives
+no additional mounts. The existing native mount/socket checks,
 private namespaces, host/provider firewalls, credential separation, model-free
 CUDA gate and second model permit remain required. First obtain an authenticated
 model reply, then a browser reply and verified teardown. Host inventory and free

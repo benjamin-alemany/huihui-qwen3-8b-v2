@@ -2,6 +2,11 @@ name: Chat credential boundary CPU verification
 on:
   workflow_dispatch:
     inputs:
+      existing_vm_only:
+        description: Read-only CPU verification of the exact existing VM image; no builds or publication
+        required: false
+        type: boolean
+        default: false
       prepared_host_only:
         description: Inspect the pinned runtime compatibility libraries without a GPU or model layers
         required: false
@@ -35,7 +40,7 @@ concurrency:
 jobs:
   verify:
     # Standard public runner only. No packages, artifacts, cache or cloud keys.
-    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -59,7 +64,7 @@ jobs:
         run: docker run --rm --name qwen-chat-boundary-cpu --platform linux/amd64 --network none --cpus 1 --memory 256m --pids-limit 64 qwen-chat-boundary-cpu:ci
   transport:
     # Disposable CPU analogue, NOT serving-image/CUDA/Runpod acceptance.
-    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -88,7 +93,7 @@ jobs:
             timeout 50s "$RUNNER_TEMP/qwen-transport-venv/bin/python" -I -B chat/boundary_tests/transport_probe.py
   serving-libraries:
     # Existing public image only; never build/publish serving images or load weights.
-    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: github.event.repository.visibility == 'public' && !inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -122,18 +127,21 @@ jobs:
               exec python3 -I -B /opt/qwen/boundary_tests/runtime_probe_boot.py
             '
   cuda-diagnostic:
-    if: inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: inputs.cuda_diagnostic_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     uses: ./.github/workflows/cuda-diagnostic-cpu.yml
 
   vm-boundary:
-    if: inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     uses: ./.github/workflows/vm-boundary-cpu.yml
   docker-daemon:
-    if: inputs.docker_daemon_only && !inputs.vm_boundary_only && !inputs.cuda_diagnostic_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: inputs.docker_daemon_only && !inputs.vm_boundary_only && !inputs.cuda_diagnostic_only && !inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     uses: ./.github/workflows/docker-daemon-config.yml
   ubuntu-apt-preflight:
-    if: inputs.ubuntu_apt_only && !inputs.prepared_host_only
+    if: inputs.ubuntu_apt_only && !inputs.prepared_host_only && !inputs.existing_vm_only
     uses: ./.github/workflows/ubuntu-apt-preflight.yml
   prepared-host-inspection:
-    if: inputs.prepared_host_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.cuda_diagnostic_only && !inputs.ubuntu_apt_only
+    if: inputs.prepared_host_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.cuda_diagnostic_only && !inputs.ubuntu_apt_only && !inputs.existing_vm_only
     uses: ./.github/workflows/prepared-host-inspect.yml
+  existing-vm-compatibility:
+    if: inputs.existing_vm_only && !inputs.prepared_host_only && !inputs.vm_boundary_only && !inputs.docker_daemon_only && !inputs.cuda_diagnostic_only && !inputs.ubuntu_apt_only
+    uses: ./.github/workflows/existing-vm-compat-inspect.yml

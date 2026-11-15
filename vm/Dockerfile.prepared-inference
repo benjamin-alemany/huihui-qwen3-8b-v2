@@ -1,8 +1,0 @@
-# Candidate only. Reuse the exact existing VM image/cache layers without model
-# downloads, dependency upgrades, host packages or changes to native isolation.
-FROM ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278
-USER root
-COPY --link --chown=0:0 --chmod=0444 vm/cuda_compat.py vm/cuda-compat.lock.json vm/prepared_credential_boot.py /opt/qwen/
-LABEL work.unjailed.profile="vm-inference-prepared-r570-v1"
-ENTRYPOINT ["python3","-I","-S","-B","/opt/qwen/prepared_credential_boot.py"]
-CMD []
