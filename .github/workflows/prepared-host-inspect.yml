@@ -49,3 +49,24 @@ jobs:
               result["package"]={"name":fields[0],"version":fields[1],"architecture":fields[2]}
           print("CUDA_COMPAT_INVENTORY="+json.dumps(result,sort_keys=True,separators=(",",":")))
           '
+      - name: Validate reviewed compatibility hashes with the runtime helper
+        run: |
+          set -euo pipefail
+          image='vllm/vllm-openai@sha256:6ee133356d49ed24cee03dd0cda3d3980279a11c107ce3e752c89e76540f41c9'
+          docker run --rm --network none --read-only --user 10001:10001 \
+            --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 1g --pids-limit 32 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/vm/cuda_compat.py,target=/opt/compat-review/cuda_compat.py,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/vm/cuda-compat.lock.json,target=/opt/compat-review/cuda-compat.lock.json,readonly" \
+            --entrypoint python3 "$image" -I -S -B -c '
+          import json,sys
+          sys.path.insert(0,"/opt/compat-review")
+          from cuda_compat import lock_digest,verify_compatibility
+          with open("/opt/compat-review/cuda-compat.lock.json") as source:
+              lock=json.load(source)
+          assert lock["sourceImage"]=="vllm/vllm-openai@sha256:6ee133356d49ed24cee03dd0cda3d3980279a11c107ce3e752c89e76540f41c9"
+          loader_path=verify_compatibility(lock)
+          assert "torch" not in sys.modules and "vllm" not in sys.modules
+          print("CUDA_COMPAT_REVIEWED_LIBRARY_PATH="+loader_path)
+          print("CUDA_COMPAT_REVIEWED_LOCK_SHA256="+lock_digest(lock))
+          print("CUDA_COMPAT_SOURCE_HASH_VALIDATION_PASSED_MODEL_NOT_STARTED_GPU_NOT_INITIALIZED")
+          '
