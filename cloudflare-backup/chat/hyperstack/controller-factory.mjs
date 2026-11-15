@@ -93,6 +93,7 @@ function unavailableLifecycle(code){
 // gates. Environment flags alone cannot approve this release or fake readiness.
 export function hyperstackControllerFactory({env,storage,release=manifest,bundle=null,renderBootstrap=null,bootstrapReady=()=>false,runtimeOrchestratorReady=()=>false,fetchImpl=fetch,now=Date.now}={}){
  const blockers=[];let target,lifecycle,operatorBudget,hostTunnelCredential,originalAcceptance=null;
+ const inventoryOnly=release?.artifact?.runtimeProfile==='host-inventory-v1';
  try{target=trustedTarget(env?.HYPERSTACK_TARGET_JSON);}catch{blockers.push('HYPERSTACK_TARGET_UNVERIFIED');}
  const validationMode=env?.VALIDATION_MODE==='true';let sourceApproved=releaseApprovedFor(validationMode?'acceptance':'production',release);
  if(validationMode&&sourceApproved&&target){
@@ -107,7 +108,7 @@ export function hyperstackControllerFactory({env,storage,release=manifest,bundle
  try{lifecycle=hyperstackLifecycle({target,release});}catch{blockers.push('HYPERSTACK_RELEASE_UNPINNED');}
  try{operatorBudget=parseOperatorBudget(env?.OPERATOR_BUDGET_RECONCILIATION);if(operatorBudget===null)throw Error();}catch{operatorBudget={invalid:true};blockers.push('HYPERSTACK_BUDGET_UNRECONCILED');}
  try{originalAcceptance=parseOriginalAcceptance(env?.ORIGINAL_ACCEPTANCE_JSON);if(originalAcceptance===null)throw Error();}catch{originalAcceptance=null;blockers.push('HYPERSTACK_ORIGINAL_ACCEPTANCE_UNCONFIGURED');}
- try{hostTunnelCredential=tunnelCredential(env?.HYPERSTACK_HOST_TUNNEL_CREDENTIAL_JSON);}catch{blockers.push('HYPERSTACK_HOST_TUNNEL_UNCONFIGURED');}
+ if(!inventoryOnly)try{hostTunnelCredential=tunnelCredential(env?.HYPERSTACK_HOST_TUNNEL_CREDENTIAL_JSON);}catch{blockers.push('HYPERSTACK_HOST_TUNNEL_UNCONFIGURED');}
  let bootstrapPrepared=false,runtimePrepared=false;
  try{bootstrapPrepared=typeof renderBootstrap==='function'&&bootstrapReady(release,bundle)===true;}catch{}
  try{runtimePrepared=runtimeOrchestratorReady(release,bundle)===true;}catch{}
@@ -122,11 +123,11 @@ export function hyperstackControllerFactory({env,storage,release=manifest,bundle
  if(configReady){provider=hyperstackClient(key,{target,now,fetchImpl,
   bootstrapFor:boundBootstrapFor({storage,target,release,bundle,renderBootstrap:env?.START_ENABLED==='true'&&blockers.length===0?renderBootstrap:null,hostTunnelCredential,now}),
   beforeCreate:boundCampaignCreateGate({storage,target,release,campaign,required:validationMode,childApprovalId:env?.APPROVED_ACCEPTANCE_ID,now}),
-  verifyHealth:runtimePrepared&&sourceApproved?runtimeHandshake({storage,target,release,lifecycle,sessionChecked,verifyHostGatewayReceipt,sealFirewall:(allocation,reservation)=>provider.sealFirewall(allocation,reservation),fetchImpl,now}):async()=>false});
+  verifyHealth:!inventoryOnly&&runtimePrepared&&sourceApproved?runtimeHandshake({storage,target,release,lifecycle,sessionChecked,verifyHostGatewayReceipt,sealFirewall:(allocation,reservation)=>provider.sealFirewall(allocation,reservation),fetchImpl,now}):async()=>false});
   provider.diagnostics=(allocation,reservation,sessionId)=>collectHostDiagnostics({key,allocation,reservation,sessionId,providerGet:id=>provider.get(id),fetchImpl,now});
  }
  return Object.freeze({provider,lifecycle:lifecycle??unavailableLifecycle(lockedCode),operatorBudget,originalAcceptance,validationMode,connected:configReady,key:keyConfigured?key:undefined,
   enabled:env?.START_ENABLED==='true'&&blockers.length===0,
   catalog:configReady?()=>provider.catalog():deny,
-  readiness:Object.freeze({provider:'hyperstack',credentialsConfigured:keyConfigured,guardAccountConfigured,guardTailTokenConfigured,targetConfigured:!!target,releasePinned:!!lifecycle,budgetConfigured:!operatorBudget.invalid,originalAcceptanceConfigured:originalAcceptance!==null,bootstrapPrepared,runtimeOrchestratorPrepared:runtimePrepared,sourceApproved,blockers:Object.freeze(blockers)})});
+  readiness:Object.freeze({provider:'hyperstack',...(inventoryOnly?{inventoryOnly:true,modelLaunchPossible:false}:{}),credentialsConfigured:keyConfigured,guardAccountConfigured,guardTailTokenConfigured,targetConfigured:!!target,releasePinned:!!lifecycle,budgetConfigured:!operatorBudget.invalid,originalAcceptanceConfigured:originalAcceptance!==null,bootstrapPrepared,runtimeOrchestratorPrepared:runtimePrepared,sourceApproved,blockers:Object.freeze(blockers)})});
 }

@@ -43,7 +43,8 @@ export function creationTimestampIdentity(value,reservation){
 }
 export function validateTarget(t){
   const profile=plain(t)?TARGET_PROFILES.get(t.flavorName):null;
-  if(!profile||t.region!=='CANADA-1'||t.imageName!=='Ubuntu Server 24.04 LTS (Noble Numbat)'||!text(t.environmentName)||!text(t.keyName)||t.inferenceOrigin!==INFERENCE_ORIGIN)fail('HYPERSTACK_TARGET_INVALID');
+  const prepared=plain(t)&&t.imageId===517&&t.imageName==='Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker'&&t.flavorId===100&&t.flavorName==='n3-A100x1';
+  if(!profile||t.region!=='CANADA-1'||!(t.imageName==='Ubuntu Server 24.04 LTS (Noble Numbat)'||prepared)||!text(t.environmentName)||!text(t.keyName)||t.inferenceOrigin!==INFERENCE_ORIGIN)fail('HYPERSTACK_TARGET_INVALID');
   for(const k of ['environmentId','flavorId','imageId'])id(t[k]);
   if(typeof t.maximumHourlyUSD!=='number'||!Number.isFinite(t.maximumHourlyUSD)||t.maximumHourlyUSD<=0||t.maximumHourlyUSD>profile.maximumHourlyUSD)fail('HYPERSTACK_RATE_LIMIT_INVALID');
   return Object.freeze({environmentId:id(t.environmentId),environmentName:t.environmentName,region:t.region,flavorId:id(t.flavorId),flavorName:t.flavorName,imageId:id(t.imageId),imageName:t.imageName,keyName:t.keyName,inferenceOrigin:INFERENCE_ORIGIN,maximumHourlyUSD:t.maximumHourlyUSD});
