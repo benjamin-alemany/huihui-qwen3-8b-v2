@@ -39,6 +39,16 @@ class InventoryProbeTests(unittest.TestCase):
         with patch.object(probe,'MAX_RECEIPT',100):
             with self.assertRaises(Refused):probe.receipt(f.session,inventory,'a'*64,now=f.start+1)
 
+    def test_large_but_bounded_package_inventory_is_not_discarded_at_32k(self):
+        f=NativeFixture();inventory=f.proposal()
+        while len(inventory['files'])<96:
+            index=len(inventory['files'])
+            inventory['files'].append({'path':'/usr/lib/x86_64-linux-gnu/libnvidia-'+('a'*220)+str(index)+'.so.1','package':'libnvidia-compute-570','sha256':'1'*64,'size':1})
+        inventory['files'].sort(key=lambda value:value['path'])
+        raw=probe.receipt(f.session,inventory,'a'*64,now=f.start+1)
+        self.assertGreater(len(raw),32768)
+        self.assertLessEqual(len(raw),65536)
+
     def test_independent_source_digest_refuses_changed_or_writable_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);files={}

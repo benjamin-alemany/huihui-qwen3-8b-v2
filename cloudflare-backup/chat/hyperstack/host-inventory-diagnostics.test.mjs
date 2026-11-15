@@ -78,12 +78,21 @@ function failureFixture(){
 test('failure parser exposes only a bound closed phase and rejects arbitrary errors or permits',()=>{
  const f=failureFixture();assert.deepEqual(parseHostInventoryFailure(f.logs,f.binding),f.receipt);assert.equal(parseHostInventory(f.logs,f.binding),null);
  assert.deepEqual(parseHostInventoryFailure(f.logs+f.logs,f.binding),f.receipt);
+ assert.equal(parseHostInventoryFailure(HOST_INVENTORY_FAILURE_PREFIX+canonical({...f.receipt,phase:'receipt-limit'}),f.binding)?.phase,'receipt-limit');
  for(const patch of [{phase:'NEVER_RETURN_DUMMY_SECRET'},{phase:'ready'},{sourceSHA256:'f'.repeat(64)},{nonce:'b'.repeat(32)},{sessionId:'33333333-3333-4333-8333-333333333333'},{observedAt:NOW-1},{observedAt:NOW+2001},{observedAt:1.5},{deadlineUTC:new Date(NOW+1800001).toISOString()},{modelPermitIssued:true},{error:'NEVER_RETURN_DUMMY_SECRET'}]){
   assert.equal(parseHostInventoryFailure(HOST_INVENTORY_FAILURE_PREFIX+canonical({...f.receipt,...patch}),f.binding),null);
  }
  const json=canonical(f.receipt);assert.equal(parseHostInventoryFailure(HOST_INVENTORY_FAILURE_PREFIX+json.replace('"phase":','"phase":"unknown","phase":'),f.binding),null);
  assert.equal(parseHostInventoryFailure(HOST_INVENTORY_FAILURE_PREFIX+json+' ',f.binding),null);
  assert.equal(parseHostInventoryFailure(HOST_INVENTORY_FAILURE_PREFIX+' '.repeat(32768),f.binding),null);
+});
+test('a full bounded file inventory and duplicate console devices survive capture beyond 32 KiB',async()=>{
+ const f=fixture();
+ while(f.receipt.inventory.files.length<96){const n=f.receipt.inventory.files.length;f.receipt.inventory.files.push({path:'/usr/lib/x86_64-linux-gnu/libnvidia-'+'a'.repeat(220)+n+'.so.1',package:'libnvidia-compute-570',sha256:'1'.repeat(64),size:1});}
+ f.receipt.inventory.files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+ f.logs=HOST_INVENTORY_PREFIX+canonical(f.receipt)+'\n';assert(f.logs.length>32768&&f.logs.length<65536);
+ assert.deepEqual(parseHostInventory(f.logs,f.binding),f.receipt);
+ f.logs=f.logs.repeat(3);const h=collector(f);assert.deepEqual(await collectHostInventory(h.options),f.receipt);
 });
 test('collector uses only the exact documented console API and validates the VM before and after capture',async()=>{
  const f=fixture(),{options,calls}=collector(f),result=await collectHostInventory(options);assert.deepEqual(result,f.receipt);

@@ -22,7 +22,7 @@ from prepared_host import canonical_inventory, collect_inventory
 
 FILES = ('host_policy.py', 'prepared_host.py', 'host_inventory_probe.py', 'inventory_deadline.py')
 PREFIX = 'UNJAILED_HOST_INVENTORY '
-MAX_RECEIPT = 32768
+MAX_RECEIPT = 65536
 FAILURE_PHASES = ('os-identity','gpu-identity','kernel-module','package-inventory','package-file-provenance','file-integrity','docker-version','proposal-contract')
 
 
@@ -67,7 +67,7 @@ def publish(raw):
             fd = os.open(name, os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
             info = os.fstat(fd)
             if info.st_uid == 0 and stat.S_ISCHR(info.st_mode):
-                data=b'\n'+raw;offset=0;limit=time.monotonic()+3
+                data=b'\n'+raw;offset=0;limit=time.monotonic()+8
                 while offset<len(data) and time.monotonic()<limit:
                     try:
                         count=os.write(fd,data[offset:])
@@ -89,13 +89,14 @@ def main():
         raise Refused('Approved root inventory execution required')
     verified_source(sys.argv[3])
     session = manifest_from(json.loads(root_file('/etc/unjailed/session.json').read_text()))
-    try:inventory = collect_inventory(session)
+    try:
+        inventory = collect_inventory(session)
+        publish(receipt(session, inventory, sys.argv[3]))
     except Exception as error:
-        phase=next((p for p in FAILURE_PHASES if str(error)=='Prepared host inventory refused at '+p+'; no model start'),'unknown')
+        phase='receipt-limit' if str(error)=='Inventory receipt exceeds bound' else next((p for p in FAILURE_PHASES if str(error)=='Prepared host inventory refused at '+p+'; no model start'),'unknown')
         value={'version':1,'kind':'host-inventory-failure-v1','sessionId':session['sessionId'],'nonce':session['nonce'],'deadlineUTC':session['deadlineUTC'],'sourceSHA256':sys.argv[3],'observedAt':int(time.time()*1000),'phase':phase}
         publish(('UNJAILED_HOST_INVENTORY_FAILURE '+json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode('ascii'))
         raise Refused('Host inventory failed; fixed diagnostic emitted') from None
-    publish(receipt(session, inventory, sys.argv[3]))
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@ import {HOST_INVENTORY_PROFILE,HOST_INVENTORY_SERVING_IMAGE} from './host-invent
 
 export const HOST_INVENTORY_PREFIX='UNJAILED_HOST_INVENTORY ';
 export const HOST_INVENTORY_FAILURE_PREFIX='UNJAILED_HOST_INVENTORY_FAILURE ';
-const MAX_RESPONSE=256*1024,MAX_LINE=32768,REQUEST_MS=8000,OPERATION_MS=30000;
+const MAX_RESPONSE=512*1024,MAX_LINE=65536,REQUEST_MS=8000,OPERATION_MS=30000;
 const MAX_FILE_BYTES=256*1024**2,MAX_TOTAL_BYTES=768*1024**2;
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const HASH=/^[a-f0-9]{64}$/,KERNEL=/^[A-Za-z0-9][A-Za-z0-9.+-]{0,99}$/;
@@ -107,7 +107,7 @@ export function parseHostInventoryFailure(logs,binding={}){
    if(!line.startsWith(HOST_INVENTORY_FAILURE_PREFIX))continue;
    if(new TextEncoder().encode(line).byteLength+1>MAX_LINE)refuse();
    const text=line.slice(HOST_INVENTORY_FAILURE_PREFIX.length),value=JSON.parse(text);
-   if(canonical(value)!==text||!exact(value,['version','kind','sessionId','nonce','deadlineUTC','sourceSHA256','observedAt','phase'])||value.version!==1||value.kind!=='host-inventory-failure-v1'||value.sessionId!==sessionId||value.nonce!==q.nonce||value.deadlineUTC!==new Date(q.deadline).toISOString()||value.sourceSHA256!==sourceSHA256||!safeTime(value.observedAt)||value.observedAt<q.createdNotBefore||value.observedAt>observedAt||value.observedAt>=q.deadline||!['os-identity','gpu-identity','kernel-module','package-inventory','package-file-provenance','file-integrity','docker-version','proposal-contract','unknown'].includes(value.phase))refuse();
+   if(canonical(value)!==text||!exact(value,['version','kind','sessionId','nonce','deadlineUTC','sourceSHA256','observedAt','phase'])||value.version!==1||value.kind!=='host-inventory-failure-v1'||value.sessionId!==sessionId||value.nonce!==q.nonce||value.deadlineUTC!==new Date(q.deadline).toISOString()||value.sourceSHA256!==sourceSHA256||!safeTime(value.observedAt)||value.observedAt<q.createdNotBefore||value.observedAt>observedAt||value.observedAt>=q.deadline||!['os-identity','gpu-identity','kernel-module','package-inventory','package-file-provenance','file-integrity','docker-version','proposal-contract','receipt-limit','unknown'].includes(value.phase))refuse();
    const receipt={version:1,kind:'host-inventory-failure-v1',sessionId,nonce:q.nonce,deadlineUTC:new Date(q.deadline).toISOString(),sourceSHA256,observedAt:value.observedAt,phase:value.phase},current=canonical(receipt);
    if(encoded!==null&&encoded!==current)refuse();
    encoded=current;result=receipt;

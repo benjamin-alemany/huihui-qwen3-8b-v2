@@ -10,10 +10,10 @@
   "artifact": {
     "servingImage": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278",
     "runtimeProfile": "host-inventory-v1",
-    "bootstrapLockSha256": "409e1012a400c07f3aa39104eac8527d9d77d23204d0bcb01f6927e000ce5afd",
-    "bootstrapBundleSha256": "409e1012a400c07f3aa39104eac8527d9d77d23204d0bcb01f6927e000ce5afd",
+    "bootstrapLockSha256": "52dcdc3f8abac266ac1d79ee0543eec66be050f5801c85131519b81750139440",
+    "bootstrapBundleSha256": "52dcdc3f8abac266ac1d79ee0543eec66be050f5801c85131519b81750139440",
     "bootstrapSourceCommit": "1054774eedd79fead9e3bdef2c96547022cf4575",
-    "bootstrapBundleSize": 42857,
+    "bootstrapBundleSize": 42965,
     "runtimeOrchestrator": "host-inventory-v1"
   },
   "hosting": {
