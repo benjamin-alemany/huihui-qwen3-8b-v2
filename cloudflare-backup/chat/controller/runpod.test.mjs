@@ -18,3 +18,20 @@ test('health calls use only fixed inference URL and inference key, never billing
  assert.equal(await client.health(p,'DUMMY_INFERENCE_KEY'),true);assert.ok(calls.every(c=>c.url.startsWith('https://abcdefghijklm-8000.proxy.runpod.net/')));assert.ok(!JSON.stringify(calls).includes('DUMMY_CONTROL_KEY'));
  await assert.rejects(client.health({id:'attacker.test/path'},'DUMMY_INFERENCE_KEY'));assert.equal(calls.length,2);
 });
+
+test('malformed successful get replies never count as deletion',async()=>{
+ for(const value of [null,false,0,'',[], 'not found']){
+  const f=providerFixture([p]);
+  const client=runpodClient('DUMMY_CONTROL_KEY',{fetchImpl:async(url,options)=>{
+   const input=JSON.parse(options.body);
+   if(input.method==='tools/call'&&input.params?.name==='get-pod')return Response.json({jsonrpc:'2.0',id:input.id,result:{isError:false,content:[{type:'text',text:JSON.stringify(value)}]}});
+   return f.fetch(url,options);
+  }});
+  await assert.rejects(client.cleanup(p,q,.59),/RUNPOD_RESPONSE_INVALID/);
+  assert.ok(!f.calls.some(c=>['pod-action','delete-pod'].includes(c.tool)));
+ }
+});
+test('the exact structured get-pod 404 still establishes absence',async()=>{
+ const f=providerFixture(),client=runpodClient('DUMMY_CONTROL_KEY',{fetchImpl:f.fetch});
+ assert.equal(await client.get(p.id),null);
+});

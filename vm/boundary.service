@@ -1,0 +1,11 @@
+[Unit]
+Description=Seal inference host egress before any model/tunnel startup
+After=unjailed-bootstrap.service
+Requires=unjailed-bootstrap.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I -B /opt/unjailed/vm/seal_boundary.py --execute
+User=root
+UMask=0077
+RemainAfterExit=true
+Restart=no

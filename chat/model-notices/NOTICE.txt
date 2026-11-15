@@ -1,0 +1,10 @@
+Model: huihui-ai/Huihui-Qwen3-8B-abliterated-v2
+Revision: 7d89db76029281fd8f3e6698a8e30738608105a9
+Publisher: huihui-ai; based on Qwen3-8B by Qwen.
+Pinned model card declares Apache-2.0:
+https://huggingface.co/huihui-ai/Huihui-Qwen3-8B-abliterated-v2/blob/7d89db76029281fd8f3e6698a8e30738608105a9/README.md
+Original model: https://huggingface.co/Qwen/Qwen3-8B
+
+Packaging adds chat-only launch, authentication, offline-file checks and process/
+network restrictions. Model weights are not modified by this packaging.
+These notices and file-integrity checks are not a behavioral trust assessment.

@@ -27,6 +27,8 @@ export function runpodClient(key,{fetchImpl=fetch}={}){
     const result=await rpc('tools/call',{name,arguments:args});
     let d;try{d=JSON.parse(result.content.find(c=>c.type==='text').text);}catch{throw Error('RUNPOD_RESPONSE_INVALID');}
     if(result?.isError){if(name==='get-pod'&&d?.status===404&&d.detail==='pod not found')return null;throw Error('RUNPOD_REQUEST_UNCONFIRMED');}
+    // A malformed successful reply is not evidence that the Pod was deleted.
+    if(name==='get-pod'&&(!d||typeof d!=='object'||Array.isArray(d)))throw Error('RUNPOD_RESPONSE_INVALID');
     return d;
   }
   const safePod=p=>p?Object.fromEntries(['id','name','image','cloud','gpu','cost','createdAt','status','disk','ports','mounts','actions','locked'].map(k=>[k,p[k]])):null;

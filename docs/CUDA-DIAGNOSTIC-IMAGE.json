@@ -1,0 +1,42 @@
+{
+  "image": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:7638b7fdf0e0cf08eae61e3dcd7818431992adeb3c75e2cd1e2211dedcbb5508",
+  "digest": "sha256:7638b7fdf0e0cf08eae61e3dcd7818431992adeb3c75e2cd1e2211dedcbb5508",
+  "base_image": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c",
+  "build_source_sha": "bcc206fdf17f509497ea637c9e92660eb4446226",
+  "build_run_id": 42847580990,
+  "build_success": true,
+  "build_run_full_conclusion": "failure_in_cpu_fixture_before_diagnostic",
+  "observer_sha256": "9411c2881ec9d75ae1d47166896c83f34ca40ad0bcad173c89703827b21b0281",
+  "compressed_bytes": 9205792477,
+  "uncompressed_bytes": 23403915393,
+  "layer_count": 44,
+  "cpu_artifact_review_pending": false,
+  "runpod_cuda_validated": false,
+  "model_weights_included": false,
+  "diagnostic_image_published": true,
+  "new_paid_resources_started": false,
+  "agent_tools_enabled": false,
+  "network_release_pin_approved": false,
+  "cpu_artifact_review_conclusion": "success",
+  "cpu_artifact_review_run_id": 42850263624,
+  "cpu_artifact_review_url": "https://github.com/benjamin-alemany/huihui-qwen3-8b-v2/actions/runs/42850263624",
+  "review_source_sha": "9ab790166cceeb0f60dc21aff949568ac31306da",
+  "review": {
+    "digest": "sha256:7638b7fdf0e0cf08eae61e3dcd7818431992adeb3c75e2cd1e2211dedcbb5508",
+    "uncompressed_bytes": 23403915393,
+    "source_hashes_verified": true,
+    "observer_sha256": "9411c2881ec9d75ae1d47166896c83f34ca40ad0bcad173c89703827b21b0281",
+    "cpu_boot_verified": true,
+    "model_loaded": false,
+    "paid_resource_started": false,
+    "runpod_cuda_validated": false,
+    "agent_tools_enabled": false
+  },
+  "latest_runpod_attempt": {
+    "status": "CREATE_REQUEST_FAILED_NO_POD_OBSERVED",
+    "diagnostic_started": false,
+    "provider_reason_confirmed": false,
+    "retry_performed": false,
+    "guard_keys_removed": true
+  }
+}

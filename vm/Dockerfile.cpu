@@ -1,0 +1,11 @@
+# Small existing public CPU-tested base, no Torch/vLLM/model-weight pull.
+FROM ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:6f652142fdbe0f7b824865781a35858dbf2a49d802d87ce9b469b8763afa09c3
+USER root
+COPY --chown=0:0 --chmod=0444 chat/credential_boot.py chat/credential_boundary.py chat/offline_cache.py start.py /opt/qwen/
+COPY --chown=0:0 --chmod=0444 vm/boot.py /opt/qwen/inference_only.py
+COPY --chown=0:0 --chmod=0444 vm/cpu_child.py /opt/qwen/model_boot.py
+COPY --chown=0:0 --chmod=0444 vm/cpu_preflight.py /opt/qwen/preflight.py
+COPY --chown=0:0 --chmod=0444 vm/inference_policy.py vm/image_setup.py vm/dummy_cache.py vm/attestation.py vm/host_policy.py /opt/qwen/
+RUN python3 -I -S -B /opt/qwen/image_setup.py && python3 -I -S -B /opt/qwen/dummy_cache.py
+ENTRYPOINT ["python3","-I","-S","-B","/opt/qwen/credential_boot.py"]
+CMD []

@@ -29,8 +29,8 @@ def deadline_from(env, now=None):
     except (KeyError, TypeError, ValueError):
         raise ValueError("Valid immutable UTC creation and deadline timestamps are required") from None
     current = time.time() if now is None else now
-    if not created <= current < deadline or not 0 < deadline - created <= 30 * 60:
-        raise ValueError("Only an unexpired session of at most thirty minutes is allowed")
+    if not created <= current < deadline or not 0 < deadline - created <= 60 * 60:
+        raise ValueError("Only an unexpired session of at most sixty minutes is allowed")
     start.validate_environment(env)
     return deadline
 
@@ -39,6 +39,10 @@ def main():
     boundary.assert_clean_boot()
     deadline = deadline_from(os.environ)
     model_env = boundary.model_environment(os.environ)
+    # Fixed trusted compatibility code, never inherited/caller-selected. It only
+    # reports loopback interface metadata; kernel network restrictions stay on.
+    model_env['LD_PRELOAD'] = '/opt/qwen/loopback_ifaddrs.so'
+    model_env['GLOO_SOCKET_IFNAME'] = 'lo'
     boundary.prepare_filesystem()
     requested = [False]
     for sig in (signal.SIGTERM, signal.SIGINT):

@@ -47,3 +47,12 @@ test('owner-requested early stop only shortens, never extends the original deadl
  }
  assert.throws(()=>queryFrom(JSON.stringify({...q,earlyStopAt:'not-a-date'})));
 });
+test('product reservations bind 15/30/60 minutes and the independent backup minute',async()=>{
+ for(const minutes of [15,30,60])for(const [role,extra]of [['primary',0],['backup',1]]){
+  const reservation={...q,minutes},f=fake([list([p])]);
+  const result=await checkChatStop({...env,CHAT_STOP_ROLE:role,ARMED_CHAT:JSON.stringify(reservation)},{...f,now:Date.parse(p.createdAt)});
+  assert.equal(result.results[0].deadline,Date.parse(p.createdAt)+(minutes+extra)*60000);
+ }
+ for(const minutes of [0,18,31,61,600,'30'])assert.throws(()=>queryFrom(JSON.stringify({...q,minutes})));
+ assert.throws(()=>queryFrom(JSON.stringify({...q,kind:'probe',name:'qwen-chat-probe-1234567890abcdef',minutes:30})));
+});

@@ -1,3 +1,8 @@
+> Current security review: the new recipe includes a fail-closed network-boundary
+> candidate, but no replacement image has been built or validated. Controller
+> launches are source-locked pending exact-image/runtime verification. See
+> `docs/CHAT-NETWORK-REVIEW.md`. The credential-only probe does not verify egress.
+
 # Candidate chat credential boundary
 
 This replacement is prepared for tool-free inference. It has not been verified

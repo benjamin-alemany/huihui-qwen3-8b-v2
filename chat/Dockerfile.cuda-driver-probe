@@ -1,0 +1,12 @@
+# Driver-only diagnostic; not the serving-image CUDA/vLLM acceptance artifact.
+# Official CUDA 13.0 amd64 base read back from Docker Hub; no model or pip packages.
+FROM docker.io/nvidia/cuda@sha256:cf5ab24c3f5040a0ea5931658874c2158e606bf740f006809aa4bb9d3334016b
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 libseccomp2 \
+    && dpkg-query -W -f='${Package} ${Version}\n' > /opt/driver-probe-packages.txt \
+    && rm -rf /var/lib/apt/lists/*
+COPY --chown=0:0 --chmod=0444 credential_boot.py credential_boundary.py inference_only.py network_boundary.py start.py /opt/qwen/
+COPY --chown=0:0 --chmod=0444 cuda_diagnostic.py /opt/qwen/model_boot.py
+COPY --chown=0:0 --chmod=0444 diagnostic-loopback_ifaddrs.so /opt/qwen/loopback_ifaddrs.so
+CMD []
+ENTRYPOINT ["python3", "-I", "-S", "-B", "/opt/qwen/credential_boot.py"]

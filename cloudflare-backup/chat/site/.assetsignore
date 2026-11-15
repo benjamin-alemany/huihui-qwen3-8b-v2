@@ -1,0 +1,3 @@
+# Source-only verification fixtures must not become public static assets.
+**/*.test.*
+**/*.spec.*

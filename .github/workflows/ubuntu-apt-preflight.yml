@@ -1,0 +1,64 @@
+name: Ubuntu 24 signed metadata and APT preflight
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: unjailed-ubuntu-apt-preflight
+  cancel-in-progress: false
+jobs:
+  verify:
+    # Free disposable CPU container only. No GPU/model/provider credentials,
+    # vendor package installation, publication, artifacts or cache.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Check authentic Ubuntu Noble and vendor metadata in a disposable container
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec'
+          name="unjailed-ubuntu-apt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          task_docker_config="$(mktemp -d)"
+          clean_docker() { env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin DOCKER_CONFIG="$task_docker_config" docker "$@"; }
+          cleanup() { clean_docker rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$task_docker_config"; }
+          trap cleanup EXIT
+          timeout --signal=KILL 60s env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin DOCKER_CONFIG="$task_docker_config" docker pull --platform linux/amd64 "$image"
+          timeout --signal=KILL 390s env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin DOCKER_CONFIG="$task_docker_config" \
+            docker run --rm --name "$name" --platform linux/amd64 \
+            --cpus 2 --memory 2g --pids-limit 128 --security-opt no-new-privileges \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/candidate,readonly" \
+            --entrypoint /usr/bin/timeout "$image" --signal=KILL 360s \
+            /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C DEBIAN_FRONTEND=noninteractive \
+            /bin/sh -ceu '
+              printf "%s\n" "PUBLIC_BASE_OS_RELEASE"
+              head -c 1024 /etc/os-release
+              printf "\n%s\n" "PUBLIC_BASE_LEGACY_APT_SOURCE"
+              if test -f /etc/apt/sources.list; then head -c 1024 /etc/apt/sources.list; fi
+              printf "\n%s\n" "PUBLIC_BASE_NOBLE_APT_SOURCE"
+              if test -f /etc/apt/sources.list.d/ubuntu.sources; then head -c 4096 /etc/apt/sources.list.d/ubuntu.sources; fi
+              printf "\n%s\n" "PUBLIC_BASE_APT_SOURCE_FILENAMES"
+              find /etc/apt/sources.list.d -maxdepth 1 -type f -printf "%f\n" | head -c 1024
+              grep -qx "ID=ubuntu" /etc/os-release
+              grep -qx "VERSION_ID=\"24.04\"" /etc/os-release
+              test -f /usr/share/keyrings/ubuntu-archive-keyring.gpg
+              # The pinned image retains a comment-only migration notice here.
+              # Accept no active legacy source line, regardless of file size.
+              if test -f /etc/apt/sources.list; then
+                awk "NF && \$1 !~ /^#/ { bad=1 } END { exit bad }" /etc/apt/sources.list
+              fi
+              test "$(find /etc/apt/sources.list.d -type f)" = /etc/apt/sources.list.d/ubuntu.sources
+              # Preserve the pinned Noble image original sources/protocols.
+              # Reject any different origin before installing minimal OS tools.
+              awk "/^[[:space:]]*URIs:/ { if (NF != 2 || (\$2 != \"http://archive.ubuntu.com/ubuntu/\" && \$2 != \"http://security.ubuntu.com/ubuntu/\")) bad=1; found++ } END { exit (bad || found != 2) }" /etc/apt/sources.list.d/ubuntu.sources
+              # Original Ubuntu HTTP metadata/packages remain signature-authenticated;
+              # the vendor entries added by bootstrap remain HTTPS and pinned-key signed.
+              timeout --signal=KILL 90s apt-get --error-on=any -o Acquire::Retries=0 -o Acquire::http::Timeout=20 -o APT::Get::AllowUnauthenticated=false -o Acquire::AllowInsecureRepositories=false -o Acquire::AllowDowngradeToInsecureRepositories=false update
+              timeout --signal=KILL 120s apt-get --yes --no-install-recommends -o Acquire::Retries=0 -o Acquire::http::Timeout=20 -o APT::Get::AllowUnauthenticated=false -o Acquire::AllowInsecureRepositories=false install ca-certificates gpgv python3
+              exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C DEBIAN_FRONTEND=noninteractive python3 -I -B /candidate/vm/verify_ubuntu_apt.py --verify
+            '

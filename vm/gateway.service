@@ -1,0 +1,18 @@
+[Unit]
+Description=Private host-only bounded chat gateway
+[Service]
+Type=simple
+User=10002
+Group=10002
+ExecStart=/usr/bin/python3 -I -B /opt/unjailed/vm/gateway.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/run/unjailed/permissions
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET
+InaccessiblePaths=/run/unjailed/attestations /var/run/docker.sock /run/containerd
+UMask=0077
+Restart=no

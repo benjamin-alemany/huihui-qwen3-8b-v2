@@ -1,0 +1,82 @@
+"""Verify small vendor metadata only. Never downloads/executes a package payload."""
+import argparse,gzip,hashlib,io,json,re,subprocess,tempfile,urllib.request
+from pathlib import Path
+HERE=Path(__file__).resolve().parent
+class Refused(ValueError): pass
+
+def records(raw):
+    result=[]
+    for block in raw.decode('utf-8').strip().split('\n\n'):
+        row={};key=None
+        for line in block.splitlines():
+            if line.startswith((' ','\t')) and key:row[key]+=' '+line.strip()
+            elif ': ' in line:key,value=line.split(': ',1);row[key]=value
+        if row.get('Package'):result.append(row)
+    return result
+
+def fetch(url,limit):
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url,timeout=25) as reply:
+        if reply.geturl()!=url:raise Refused('Metadata redirect refused')
+        raw=reply.read(limit+1)
+    if len(raw)>limit:raise Refused('Metadata exceeds bound')
+    return raw
+
+def verify_index(release,index,name,algorithm):
+    if algorithm not in ('sha256','sha512'):raise Refused('Unreviewed signed index digest algorithm')
+    try:lines=release.decode('utf-8').splitlines()
+    except UnicodeError:raise Refused('Invalid signed release encoding')
+    headers=[i for i,line in enumerate(lines) if line==algorithm.upper()+':']
+    if len(headers)!=1:raise Refused('Signed index digest absent or ambiguous')
+    # Debian Release checksum fields contain indented rows. Stop at the next
+    # field instead of collecting a second row from a later SHA512 section.
+    # The complete InRelease has already passed the pinned-key GPG check.
+    rows=[]
+    for line in lines[headers[0]+1:]:
+        if not line.startswith((' ','\t')):break
+        row=line.split()
+        if len(row)!=3 or not re.fullmatch('[0-9a-f]{'+str(hashlib.new(algorithm).digest_size*2)+'}',row[0]) or not re.fullmatch('[0-9]+',row[1]):raise Refused('Invalid signed index digest row')
+        rows.append(row)
+    matches=[r for r in rows if r[2]==name]
+    if len(matches)!=1 or int(matches[0][1])!=len(index) or hashlib.new(algorithm,index).hexdigest()!=matches[0][0]:raise Refused('Signed index digest mismatch')
+
+def verify(lock,read=fetch,gpgv='gpgv',report=None):
+    proofs={}
+    for name,repo in lock['repositories'].items():
+        phase='metadata-'+name
+        if name not in ('cuda','toolkit','docker'):raise Refused('Unreviewed vendor metadata phase')
+        if report:report(phase,'running')
+        key=HERE/'keys'/(name+'.gpg')
+        if hashlib.sha256(key.read_bytes()).hexdigest()!=repo['key_sha256']:raise Refused('Vendor key bytes changed')
+        base=repo.get('release_base',repo['base'])
+        release=read(base+'InRelease',256*1024);index=read(base+repo['index'],12*1024*1024)
+        with tempfile.TemporaryDirectory(prefix='unjailed-public-gpg-') as directory:
+            p=Path(directory)/'InRelease';p.write_bytes(release)
+            checked=subprocess.run([gpgv,'--homedir',directory,'--status-fd','1','--keyring',str(key),str(p)],capture_output=True,text=True,timeout=15)
+            signatures=[line.split() for line in checked.stdout.splitlines() if line.startswith('[GNUPG:] VALIDSIG ')]
+            if checked.returncode or not any(repo['fingerprint'] in (r[2],r[-1]) for r in signatures):raise Refused('Vendor signature refused')
+        verify_index(release,index,repo['index'],repo['algorithm'])
+        if repo['index'].endswith('.gz'):
+            with gzip.GzipFile(fileobj=io.BytesIO(index)) as stream:raw=stream.read(32*1024*1024+1)
+            if len(raw)>32*1024*1024:raise Refused('Expanded metadata too large')
+        else:raw=index
+        available=records(raw)
+        for p in (p for p in lock['packages'] if p['repository']==name):
+            candidates=[r for r in available if (r.get('Package'),r.get('Version'),r.get('Architecture'))==(p['name'],p['version'],p['architecture'])]
+            if not any(r.get('SHA256')==p['sha256'] and int(r['Size'])==p['size'] and r['Filename']==p['filename'] for r in candidates):raise Refused('Pinned package missing or changed')
+        proofs[name]={'signature_verified':True,'index_digest_verified':True,'inrelease_sha256':hashlib.sha256(release).hexdigest()}
+        if report:report(phase,'passed')
+    return proofs
+def main():
+    parser=argparse.ArgumentParser();parser.add_argument('--progress',action='store_true');args=parser.parse_args();phase=None
+    def report(current,status):
+        nonlocal phase
+        phase=current
+        print('UNJAILED_METADATA '+json.dumps({'phase':current,'status':status},sort_keys=True,separators=(',',':')),flush=True)
+    try:
+        result=verify(json.loads((HERE/'packages.lock.json').read_text()),report=report if args.progress else None)
+        print('UNJAILED_METADATA_VERIFIED' if args.progress else json.dumps(result,sort_keys=True),flush=True)
+    except Exception:
+        if args.progress and phase is not None:report(phase,'failed')
+        raise SystemExit('Trusted vendor metadata verification refused')
+if __name__=='__main__':main()

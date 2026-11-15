@@ -1,0 +1,76 @@
+{
+  "model": "huihui-ai/Huihui-Qwen3-8B-abliterated-v2",
+  "revision": "7d89db76029281fd8f3e6698a8e30738608105a9",
+  "files": {
+    "added_tokens.json": {
+      "size": 735,
+      "algorithm": "git-sha1",
+      "digest": "6f359db5332581e047a7a804174c7f6d8435081c"
+    },
+    "chat_template.jinja": {
+      "size": 4200,
+      "algorithm": "git-sha1",
+      "digest": "0f9e3230512986d465b068efb22d7646910aa172"
+    },
+    "config.json": {
+      "size": 759,
+      "algorithm": "git-sha1",
+      "digest": "75c66a47acf9f510a2e00ca8f18f8a3000b986f7"
+    },
+    "generation_config.json": {
+      "size": 227,
+      "algorithm": "git-sha1",
+      "digest": "a38edb1bd4a863dc848658556ac69adfb12f4acb"
+    },
+    "merges.txt": {
+      "size": 1671853,
+      "algorithm": "git-sha1",
+      "digest": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+    },
+    "model-00001-of-00004.safetensors": {
+      "size": 4902257696,
+      "algorithm": "sha256",
+      "digest": "ffa5adf27cd383b1fc16daba75f7fd8d15655c3a259c276dfbcb64aaca8b8e1c"
+    },
+    "model-00002-of-00004.safetensors": {
+      "size": 4915960368,
+      "algorithm": "sha256",
+      "digest": "05ceadcaaaf4bbb4c721db8a234a93f3a7ee945ecd28ffbcdd5adc05cc4b0ce8"
+    },
+    "model-00003-of-00004.safetensors": {
+      "size": 4983068496,
+      "algorithm": "sha256",
+      "digest": "4a8c92051605490ed632f85e88286fe9af9259229b3db85f0d18602cd7fef205"
+    },
+    "model-00004-of-00004.safetensors": {
+      "size": 1580230264,
+      "algorithm": "sha256",
+      "digest": "a19975bea23acc006b444e5cf2d6b76f2163c47b39214d2c7f8fb86f7b4629d6"
+    },
+    "model.safetensors.index.json": {
+      "size": 33284,
+      "algorithm": "git-sha1",
+      "digest": "48d3e2d2400a4d8e48afec6581e1899f31afb52e"
+    },
+    "special_tokens_map.json": {
+      "size": 644,
+      "algorithm": "git-sha1",
+      "digest": "3a7840311c8c90df33c823cdbb06626f920c509e"
+    },
+    "tokenizer.json": {
+      "size": 11422654,
+      "algorithm": "sha256",
+      "digest": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+    },
+    "tokenizer_config.json": {
+      "size": 5643,
+      "algorithm": "git-sha1",
+      "digest": "993ecf95c284d12b6904a255479d37d9c98090c7"
+    },
+    "vocab.json": {
+      "size": 2776833,
+      "algorithm": "git-sha1",
+      "digest": "4783fe10ac3adce15ac8f358ef5462739852c569"
+    }
+  }
+}

@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:controller": "node --test chat/controller/engine.test.mjs chat/controller/runpod.test.mjs chat/controller/receipts.test.mjs chat/validation/stop.test.mjs",
-    "test:chat": "vitest run --config vitest.chat.config.mjs",
-    "test:chat-controller": "vitest run --config vitest.chat-controller.config.mjs",
-    "test:chat-guard": "vitest run --config vitest.chat-guard.config.mjs",
-    "test:cloud": "npm run test:controller && npm run test:chat && npm run test:chat-controller && npm run test:chat-guard"
+    "test:controller": "node ../.codex/run-tests.mjs node",
+    "test:chat": "node ../.codex/run-tests.mjs chat",
+    "test:chat-controller": "node ../.codex/run-tests.mjs controller",
+    "test:chat-guard": "node ../.codex/run-tests.mjs guard",
+    "test:cloud": "node ../.codex/run-tests.mjs all"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",

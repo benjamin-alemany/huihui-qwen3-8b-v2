@@ -1,8 +1,7 @@
 // Fixed-stage validation STOP safeguard. Never create/start/delete or expose an admin API.
 const API='https://api.runpod.io/v2';
 const PRIMARY_MINUTES=Object.freeze({probe:4,chat:18});
-const IMAGE="ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:f4fda4da17fe00a8188527d3a774dcc487529b63fe2e10359912d24d4ee83761";
-const GPU='NVIDIA A40';
+import {IMAGE,GPU,SESSION_MINUTES} from '../controller/session-policy.mjs';
 export function queryFrom(raw){
   const q=JSON.parse(raw),start=Date.parse(q.windowStart),end=Date.parse(q.windowEnd);
   const zoned=s=>typeof s==='string'&&/T.*(?:Z|[+-]\d\d:\d\d)$/.test(s);
@@ -12,7 +11,10 @@ export function queryFrom(raw){
      !zoned(q.windowStart)||!zoned(q.windowEnd)||!Number.isFinite(start)||!Number.isFinite(end)||end<start||end-start>5*60000)
     throw Error('Invalid chat reservation');
   if(q.earlyStopAt!==undefined&&(!zoned(q.earlyStopAt)||!Number.isFinite(Date.parse(q.earlyStopAt))))throw Error('Invalid early stop');
-  return {name:q.name,image:q.image,start,end,kind:q.kind,earlyStopAt:q.earlyStopAt?Date.parse(q.earlyStopAt):Infinity};
+  // Legacy acceptance reservations retain their fixed stage duration. A new
+  // owner session binds one of the product durations before any creation.
+  if(q.minutes!==undefined&&(q.kind!=='chat'||!SESSION_MINUTES.includes(q.minutes)))throw Error('Invalid session duration');
+  return {name:q.name,image:q.image,start,end,kind:q.kind,minutes:q.minutes??PRIMARY_MINUTES[q.kind],earlyStopAt:q.earlyStopAt?Date.parse(q.earlyStopAt):Infinity};
 }
 function matches(p,q){
   const created=Date.parse(p.createdAt);
@@ -27,7 +29,7 @@ export async function checkChatStop(env,{now=Date.now(),fetchImpl=fetch}={}){
   if(!env.ARMED_CHAT)return {status:'unarmed'};
   const query=queryFrom(env.ARMED_CHAT);
   if(!['primary','backup'].includes(env.CHAT_STOP_ROLE))throw Error('Invalid cloud stop role');
-  const stopAfter=(PRIMARY_MINUTES[query.kind]+(env.CHAT_STOP_ROLE==='backup'?1:0))*60000;
+  const stopAfter=(query.minutes+(env.CHAT_STOP_ROLE==='backup'?1:0))*60000;
   if(!env.RUNPOD_API_KEY||env.RUNPOD_API_KEY.startsWith('__'))throw Error('Missing cloud STOP key');
   async function request(path,stop=false){
     const r=await fetchImpl(API+path,{method:stop?'POST':'GET',

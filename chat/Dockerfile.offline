@@ -1,0 +1,18 @@
+# PREPARED ONLY: weights download and serving-image publication need approval.
+# Build context is chat/, after separately approved cache_materialize.py succeeds.
+FROM ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c
+USER root
+COPY --link --chown=0:0 --chmod=0444 credential_boot.py credential_boundary.py credential_probe.py inference_only.py model_boot.py network_boundary.py offline_cache.py model-manifest.json chat_server.py /opt/qwen/
+COPY --link --chown=0:0 --chmod=0444 loopback_ifaddrs.so /opt/qwen/loopback_ifaddrs.so
+COPY --link --chown=0:0 --chmod=0444 model-notices/* /opt/qwen/model-notices/
+# Files are immutable to UID 10001; startup rehashes every file before imports.
+# Separate shard layers remain below GHCR's per-layer upload limit and avoid
+# needing two additional full 16.4 GB copies at once on a standard free runner.
+COPY --link --chown=0:0 --chmod=0444 model-cache/model-00001-of-00004.safetensors /opt/qwen-model/model-00001-of-00004.safetensors
+COPY --link --chown=0:0 --chmod=0444 model-cache/model-00002-of-00004.safetensors /opt/qwen-model/model-00002-of-00004.safetensors
+COPY --link --chown=0:0 --chmod=0444 model-cache/model-00003-of-00004.safetensors /opt/qwen-model/model-00003-of-00004.safetensors
+COPY --link --chown=0:0 --chmod=0444 model-cache/model-00004-of-00004.safetensors /opt/qwen-model/model-00004-of-00004.safetensors
+COPY --link --chown=0:0 --chmod=0444 model-cache/*.json model-cache/*.txt model-cache/*.jinja /opt/qwen-model/
+# Directory metadata is a separate layer: data stays 0444, directories need X.
+COPY --link --chown=0:0 --chmod=0555 image-layout/opt/ /opt/
+ENTRYPOINT ["python3", "-I", "-S", "-B", "/opt/qwen/credential_boot.py"]

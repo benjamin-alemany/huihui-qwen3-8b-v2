@@ -13,3 +13,7 @@ node_modules/
 *.private.*
 *.local.json*
 .DS_Store
+chat/model-cache/
+chat/loopback_ifaddrs.so
+chat/diagnostic-loopback_ifaddrs.so
+chat/image-layout/

@@ -1,0 +1,4 @@
+# Correction of directory metadata only; all code/model bytes inherit this pin.
+FROM ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:72403e30b640748c3eb2059a8cc06cc29f05af5a7f493ee09a423b68ba076635
+USER root
+COPY --link --chown=0:0 --chmod=0555 opt/ /opt/

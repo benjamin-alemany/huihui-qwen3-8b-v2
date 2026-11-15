@@ -1,0 +1,104 @@
+{
+  "source_image": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:ad3f2961a994c6d2b55c104af2372641004f311ab760a75718d5abd5eb7ddf7c",
+  "queried_at": "2026-11-09",
+  "source": "https://api.osv.dev/v1/querybatch",
+  "scope": "16 explicit serving-path Python packages only; no OS/CUDA/transitive audit or model behavioral clearance",
+  "packages": [
+    {
+      "name": "Jinja2",
+      "version": "3.1.6",
+      "query_version": "3.1.6",
+      "advisory_ids": []
+    },
+    {
+      "name": "aiohttp",
+      "version": "3.14.5",
+      "query_version": "3.14.5",
+      "advisory_ids": []
+    },
+    {
+      "name": "fastapi",
+      "version": "0.136.3",
+      "query_version": "0.136.3",
+      "advisory_ids": []
+    },
+    {
+      "name": "huggingface-hub",
+      "version": "2.2.0",
+      "query_version": "2.2.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "numpy",
+      "version": "2.2.6",
+      "query_version": "2.2.6",
+      "advisory_ids": []
+    },
+    {
+      "name": "pydantic",
+      "version": "2.14.1",
+      "query_version": "2.14.1",
+      "advisory_ids": []
+    },
+    {
+      "name": "pyzmq",
+      "version": "27.2.0",
+      "query_version": "27.2.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "query_version": "2.34.2",
+      "advisory_ids": []
+    },
+    {
+      "name": "safetensors",
+      "version": "0.8.0",
+      "query_version": "0.8.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "starlette",
+      "version": "1.8.0",
+      "query_version": "1.8.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "tokenizers",
+      "version": "0.23.3",
+      "query_version": "0.23.3",
+      "advisory_ids": []
+    },
+    {
+      "name": "torch",
+      "version": "2.13.0+cu130",
+      "query_version": "2.13.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "transformers",
+      "version": "5.19.0",
+      "query_version": "5.19.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "query_version": "2.8.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.54.0",
+      "query_version": "0.54.0",
+      "advisory_ids": []
+    },
+    {
+      "name": "vllm",
+      "version": "0.32.0",
+      "query_version": "0.32.0",
+      "advisory_ids": []
+    }
+  ]
+}

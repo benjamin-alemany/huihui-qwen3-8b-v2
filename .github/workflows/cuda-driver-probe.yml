@@ -1,0 +1,56 @@
+name: Small driver-only diagnostic (free CPU build)
+on:
+  workflow_call:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  cpu:
+    uses: ./.github/workflows/cuda-diagnostic-cpu.yml
+  build:
+    needs: cpu
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Compile existing bounded numeric observer
+        run: |
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -Wl,-z,relro,-z,now,-z,noexecstack \
+            chat/loopback_ifaddrs.c chat/cuda_syscall_audit.c -o chat/diagnostic-loopback_ifaddrs.so
+          sha256sum chat/diagnostic-loopback_ifaddrs.so
+          cp start.py chat/start.py
+      - name: Build model-free minimal artifact on existing standard daemon
+        run: |
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" -t qwen-cuda-driver-probe:review -f chat/Dockerfile.cuda-driver-probe chat
+      - name: Require protected dummy boot before registry authentication
+        env:
+          DRIVER_ONLY: 'true'
+          LOCAL_DRIVER_PROBE: qwen-cuda-driver-probe:review
+          CANDIDATE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        run: |
+          export AUDIT_SHA256="$(sha256sum chat/diagnostic-loopback_ifaddrs.so | cut -d' ' -f1)"
+          python3 -I -B chat/boundary_tests/verify_cuda_image.py
+          docker run --rm --network none --user 10001:10001 --cap-drop ALL --entrypoint cat qwen-cuda-driver-probe:review /opt/driver-probe-packages.txt
+      - name: Authenticate only existing public GHCR package
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish unique driver-only tag and verify immutable bytes
+        env:
+          DRIVER_ONLY: 'true'
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/huihui-qwen3-8b-v2:cuda-driver-probe-$GITHUB_SHA"
+          docker tag qwen-cuda-driver-probe:review "$image"
+          docker push "$image"
+          export CANDIDATE_DIGEST="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}' | cut -d@ -f2)"
+          export AUDIT_SHA256="$(sha256sum chat/diagnostic-loopback_ifaddrs.so | cut -d' ' -f1)"
+          python3 -I -B chat/boundary_tests/verify_cuda_image.py
+          printf 'Driver-only digest: `%s`\nObserver SHA256: `%s`\nNo GPU or model validation.\n' "$CANDIDATE_DIGEST" "$AUDIT_SHA256" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary registry login
+        if: always()
+        run: docker logout ghcr.io

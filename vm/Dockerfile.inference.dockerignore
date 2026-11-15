@@ -1,0 +1,17 @@
+**
+!chat/
+!vm/
+!chat/credential_boot.py
+!chat/credential_boundary.py
+!chat/offline_cache.py
+!chat/chat_server.py
+!start.py
+!vm/boot.py
+!vm/model_boot.py
+!vm/preflight.py
+!vm/egress_probe.py
+!vm/inference_policy.py
+!vm/image_setup.py
+!vm/attestation.py
+!vm/host_policy.py
+!vm/Dockerfile.inference

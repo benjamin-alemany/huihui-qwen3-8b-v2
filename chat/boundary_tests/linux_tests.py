@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import resource
+import socket
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,17 @@ class LinuxBoundaryTests(unittest.TestCase):
 
     def clean_env(self):
         return boundary.model_environment(boundary.boot_environment({"VLLM_API_KEY": "DUMMY-" + "x" * 40}))
+
+    def test_socket_on_standard_descriptor_refuses_inference(self):
+        a, b = socket.socketpair()
+        try:
+            result = subprocess.run(PROBE, env=self.clean_env(), preexec_fn=boundary.drop_privileges,
+                                    stdin=subprocess.DEVNULL, stdout=a, stderr=subprocess.PIPE,
+                                    text=True, timeout=15, close_fds=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Standard descriptors must not carry sockets', result.stderr)
+        finally:
+            a.close(); b.close()
 
     def child(self, preexec=boundary.drop_privileges, env=None, **kwargs):
         return subprocess.run(PROBE, env=self.clean_env() if env is None else env,
