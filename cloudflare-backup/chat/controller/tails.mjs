@@ -1,4 +1,4 @@
-import {ACCOUNT,GUARDS,activeVersion,receiptFrom,verifyGuardReceipts} from './receipts.mjs';
+import {ACCOUNT,GUARDS,activeVersion,receiptFrom,verifyGuardReceipts,reusableGuardHeartbeat} from './receipts.mjs';
 const MAX_FRAME_BYTES=65536;
 class TailFailure extends Error {constructor(code){super(code);this.code=code;}}
 export function safeTailFailure(error){return typeof error?.code==='string'&&/^(?:(?:VERSIONS_READ|TAIL_CREATE|TAIL_CONNECT|TAIL_UPGRADE|TAIL_CLEANUP|TOKEN_FORMAT|ACCOUNT_FORMAT|GUARD_TIMEOUT|GUARD_DEPLOYMENT_CHANGED|TAIL_FRAME|TAIL_SOCKET)(?:_HTTP_\d{3})?|TAIL_SOCKET_CLOSE_\d{4})$/.test(error.code)?error.code:'GUARD_HEARTBEAT_NOT_VERIFIED';}
@@ -93,4 +93,18 @@ export async function collectGuardReadiness(token,reservation,{accountId=ACCOUNT
     const cleanup=await Promise.allSettled(sessions.map(s=>s.dispose()));
     if(cleanup.some(r=>r.status==='rejected'))throw new TailFailure('TAIL_CLEANUP');
   }
+}
+// The Worker passes only its own stored readiness record, never owner/model
+// input. Recheck active deployments now, then reuse fresh unarmed evidence.
+// A missing/stale/changed record falls back to the original live collection.
+// Exact-reservation collection remains a separate, unchanged mandatory call.
+export async function collectPreflightHeartbeat(token,{cachedReadiness,accountId=ACCOUNT,timeoutMs=125000,fetchImpl=fetch,now=Date.now}={}){
+  if(cachedReadiness?.phase==='verified'&&cachedReadiness.heartbeatVerified===true){
+    try{
+      const versions=await cloudflareTailClient(token,{accountId,fetchImpl}).versions();
+      const cached=reusableGuardHeartbeat(cachedReadiness,versions,{now:now()});
+      if(cached)return cached;
+    }catch{/* The existing live collector below retains its fail-closed errors. */}
+  }
+  return collectGuardReadiness(token,null,{accountId,heartbeatOnly:true,timeoutMs,fetchImpl,now});
 }

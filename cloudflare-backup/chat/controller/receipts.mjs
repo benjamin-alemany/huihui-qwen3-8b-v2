@@ -49,3 +49,19 @@ export function verifyGuardReceipts(reservation,versions,events,{now=Date.now()}
   if(Object.keys(found).sort().join()!=='backup,primary')throw Error('Both current guards must execute this reservation before paid creation');
   return {schedulerReady:true,reservationName:reservation.name,image:reservation.image,receiptMaxAgeSeconds:90,guards:found,...(reservation?.provider==='hyperstack'?{provider:'hyperstack',...(reservation.ownershipPolicy!==undefined?{ownershipPolicy:reservation.ownershipPolicy}:{}),nonce:reservation.nonce,deadline:reservation.deadline}:{})};
 }
+// Only a source-verified Durable Object readiness record may be supplied here.
+// This reuses transport evidence, never reservation proof or launch permission.
+// Its original timestamps are retained; reuse cannot renew their ninety seconds.
+export function reusableGuardHeartbeat(readiness,versions,{now=Date.now()}={}){
+  try{
+    const integer=value=>Number.isSafeInteger(value)&&value>=0;
+    if(!readiness||readiness.phase!=='verified'||readiness.heartbeatVerified!==true||readiness.schedulerReady!==false||readiness.requiresExactReservation!==true||!uuid.test(readiness.id??'')||!integer(now)||!integer(readiness.requestedAt)||!integer(readiness.finishedAt)||!integer(readiness.expiresAt)||readiness.requestedAt>readiness.finishedAt||readiness.finishedAt>now||now-readiness.finishedAt>90000||readiness.expiresAt!==readiness.requestedAt+170000||now>=readiness.expiresAt||Object.keys(readiness.guards??{}).sort().join()!=='backup,primary')return null;
+    const guards={};
+    for(const[role,worker]of Object.entries(GUARDS)){
+      const r=readiness.guards[role];
+      if(!r||Object.keys(r).sort().join()!=='eventTimestamp,mode,role,version,worker'||r.role!==role||r.worker!==worker||r.mode!=='unarmed-heartbeat'||!uuid.test(r.version??'')||r.version!==versions?.[worker]||!integer(r.eventTimestamp)||r.eventTimestamp>readiness.finishedAt||r.eventTimestamp>now||now-r.eventTimestamp>90000)return null;
+      guards[role]={role,worker,version:r.version,eventTimestamp:r.eventTimestamp,mode:'unarmed-heartbeat'};
+    }
+    return {schedulerReady:false,heartbeatVerified:true,requiresExactReservation:true,guards};
+  }catch{return null;}
+}

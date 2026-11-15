@@ -1,6 +1,6 @@
 import {parseOperatorBudget} from './budget-reconcile.mjs';
 import {DurableObject,WorkerEntrypoint} from 'cloudflare:workers';
-import {collectGuardReadiness,safeTailFailure,cloudflareTailClient} from './tails.mjs';
+import {collectGuardReadiness,collectPreflightHeartbeat,safeTailFailure,cloudflareTailClient} from './tails.mjs';
 import {SessionEngine} from './engine.mjs';
 import {parseTestCampaign} from './campaign.mjs';
 import {runpodClient} from './runpod.mjs';
@@ -57,7 +57,7 @@ export class ChatSessionController extends DurableObject {
       provider,guards:[this.env.PRIMARY_GUARD,this.env.BACKUP_GUARD],
       catalog:selected?selected.catalog:()=>connected?provider.catalog():Promise.resolve(JSON.parse(this.env.PREPARED_CATALOG)),
       wake:ms=>this.ctx.storage.setAlarm(now()+(ms??100)),
-      heartbeat:()=>collectGuardReadiness(this.env.CF_TAIL_TOKEN,null,{accountId:this.#tailAccountId(),heartbeatOnly:true}),
+      heartbeat:async()=>collectPreflightHeartbeat(this.env.CF_TAIL_TOKEN,{accountId:this.#tailAccountId(),cachedReadiness:await this.ctx.storage.get('readiness')}),
       receipts:q=>collectGuardReadiness(this.env.CF_TAIL_TOKEN,q,{accountId:this.#tailAccountId()}),
       checkVersions:async proof=>{const versions=await cloudflareTailClient(this.env.CF_TAIL_TOKEN,{accountId:this.#tailAccountId()}).versions();for(const r of Object.values(proof.guards))if(versions[r.worker]!==r.version)throw new SessionError('GUARD_VERSION_CHANGED');}
     });
