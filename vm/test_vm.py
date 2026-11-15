@@ -1,5 +1,5 @@
-import copy,datetime as dt,hashlib,io,json,os,stat,sys,tempfile,unittest
-from contextlib import redirect_stdout,redirect_stderr
+import copy,datetime as dt,hashlib,io,json,os,stat,subprocess,sys,tempfile,time,unittest
+from contextlib import ExitStack,redirect_stdout,redirect_stderr
 from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
@@ -14,6 +14,84 @@ import bootstrap
 HERE=Path(__file__).resolve().parent
 class PreparedVMTests(unittest.TestCase):
  def fixture(self):return {'version':1,'sessionId':'11111111-1111-4111-8111-111111111111','nonce':'c'*32,'createdAt':'2026-11-11T12:00:00Z','deadlineUTC':'2026-11-11T12:30:00Z','image':'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'1'*64,'resources':{'vmId':123,'publicIpAddress':'203.0.113.1','volumeIds':[]}}
+ def test_startup_budget_clips_original_window_and_never_resets_on_reboot_or_clock_rollback(self):
+  m=self.fixture();created=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp();clock={'wall':created+850,'mono':100}
+  with patch.object(bootstrap.time,'time',side_effect=lambda:clock['wall']),patch.object(bootstrap.time,'monotonic',side_effect=lambda:clock['mono']):
+   budget=bootstrap.StartupBudget(m);self.assertEqual(budget.remaining(),50)
+   clock.update(wall=created+2,mono=140);self.assertEqual(budget.remaining(),10)
+   clock.update(wall=created+901,mono=141)
+   with self.assertRaises(Refused):budget.remaining()
+   with self.assertRaises(Refused):bootstrap.StartupBudget(m).remaining()
+   shorter={**m,'deadlineUTC':'2026-11-11T12:15:00Z'};self.assertEqual(bootstrap.StartupBudget(shorter).expiry,created+780)
+ def test_expired_startup_refuses_before_spawning_or_renewing_deadline(self):
+  budget=SimpleNamespace(remaining=lambda:(_ for _ in ()).throw(Refused('expired')))
+  with patch.object(bootstrap,'_BUDGET',budget),patch.object(bootstrap.subprocess,'Popen') as spawned:
+   with self.assertRaises(Refused):bootstrap.run([sys.executable,'-c','pass'])
+   spawned.assert_not_called()
+ def test_total_command_deadline_stops_trickled_output_and_only_its_own_child_group(self):
+  with tempfile.TemporaryDirectory() as directory:
+   heartbeat=Path(directory)/'child';otherbeat=Path(directory)/'other'
+   writer="import time\nfrom pathlib import Path\np=Path(%r)\nwhile True:\n with p.open('ab') as f:f.write(b'x')\n time.sleep(.02)\n"
+   independent=subprocess.Popen([sys.executable,'-I','-S','-c',writer%str(otherbeat)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+   script="import subprocess,sys,time\nsubprocess.Popen([sys.executable,'-I','-S','-c',%r])\nwhile True:\n print('DUMMY_TRICKLE',flush=True)\n time.sleep(.02)\n"%(writer%str(heartbeat))
+   started=time.monotonic()
+   try:
+    with self.assertRaises(Refused):bootstrap.run([sys.executable,'-I','-S','-c',script],timeout=.3)
+    self.assertLess(time.monotonic()-started,2);self.assertTrue(heartbeat.exists());before=heartbeat.stat().st_size;other=otherbeat.stat().st_size
+    time.sleep(.12);self.assertEqual(heartbeat.stat().st_size,before);self.assertGreater(otherbeat.stat().st_size,other);self.assertIsNone(independent.poll())
+   finally:independent.terminate();independent.wait(timeout=2)
+ def test_metadata_supervisor_requires_all_fixed_vendor_proofs_and_no_fallback(self):
+  def runner(args,timeout,line_callback):
+   self.assertEqual(args[-1],'--progress');self.assertEqual(timeout,120)
+   for phase in ['metadata-cuda','metadata-toolkit','metadata-docker']:
+    for status in ['running','passed']:line_callback('UNJAILED_METADATA '+json.dumps({'phase':phase,'status':status}))
+   line_callback('UNJAILED_METADATA_VERIFIED');return ''
+  events=[]
+  with patch.object(bootstrap,'run',side_effect=runner):bootstrap.verify_metadata(lambda phase,status:events.append((phase,status)))
+  self.assertEqual(len(events),6)
+  for value in ['UNJAILED_METADATA_VERIFIED','UNJAILED_METADATA '+json.dumps({'phase':'metadata-cuda','status':'passed'}),'DUMMY_PRIVATE_RAW_ERROR']:
+   with patch.object(bootstrap,'run',side_effect=lambda args,timeout,line_callback:line_callback(value)):
+    with self.assertRaises(Refused):bootstrap.verify_metadata(lambda *_:None)
+  with patch.object(bootstrap,'run',side_effect=Refused('timeout')) as called:
+   with self.assertRaises(Refused):bootstrap.verify_metadata(lambda *_:None)
+   self.assertEqual(called.call_count,1)
+ def test_actual_metadata_child_total_deadline_refuses_trickle_without_any_verified_fallback(self):
+  with tempfile.TemporaryDirectory() as directory:
+   script=Path(directory)/'metadata.py';script.write_text("import sys,time\nprint('UNJAILED_METADATA {\"phase\":\"metadata-cuda\",\"status\":\"running\"}',flush=True)\nwhile True:\n sys.stdout.write(' ')\n sys.stdout.flush()\n time.sleep(.02)\n")
+   events=[];started=time.monotonic()
+   with patch.object(bootstrap,'HERE',Path(directory)),patch.object(bootstrap,'METADATA_SECONDS',.25):
+    with self.assertRaises(Refused):bootstrap.verify_metadata(lambda phase,status:events.append((phase,status)))
+   self.assertLess(time.monotonic()-started,2);self.assertEqual(events,[('metadata-cuda','running')])
+ def test_apt_refresh_is_bounded_and_partial_update_errors_cannot_be_accepted(self):
+  args=bootstrap.apt_refresh_arguments();self.assertIn('--error-on=any',args);self.assertIn('Acquire::Retries=0',args);self.assertIn('Acquire::http::Timeout=20',args);self.assertIn('Acquire::https::Timeout=20',args)
+  for required in ['APT::Get::AllowUnauthenticated=false','Acquire::AllowInsecureRepositories=false','Acquire::AllowDowngradeToInsecureRepositories=false']:self.assertIn(required,args)
+  self.assertNotIn('ForceIPv4',' '.join(args));self.assertNotIn('Verify-Peer=false',' '.join(args))
+  with patch.object(bootstrap,'run',side_effect=Refused('partial update')) as run:
+   with self.assertRaises(Refused):bootstrap.refresh_indexes()
+   run.assert_called_once_with(args,timeout=120)
+ def test_failed_vendor_or_partial_apt_refresh_never_reaches_package_install_or_reboot(self):
+  for failed in ['metadata-toolkit','apt-index-refresh']:
+   with self.subTest(phase=failed),tempfile.TemporaryDirectory() as directory:
+    sandbox=Path(directory);state=sandbox/'state/bootstrap.json';state.parent.mkdir();session=sandbox/'session.json';m=self.fixture();session.write_text(json.dumps(m));events=[];commands=[];output=io.StringIO()
+    now=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp()+2
+    (sandbox/'etc/systemd/system').mkdir(parents=True);boot=sandbox/'proc/sys/kernel/random/boot_id';boot.parent.mkdir(parents=True);boot.write_text('first-boot')
+    def vm_path(*args):
+     p=Path(*args)
+     return sandbox/str(p).lstrip('/') if p.is_absolute() and (str(p).startswith('/etc/') or str(p).startswith('/proc/')) else p
+    def emit(manifest,component,phase,status='running'):events.append(json.loads(diagnostics.event(manifest,component,phase,status,now).decode().strip().removeprefix(diagnostics.PREFIX)))
+    def metadata(report):
+     for phase in ['metadata-cuda','metadata-toolkit','metadata-docker']:
+      report(phase,'running')
+      if phase==failed:raise Refused('DUMMY_PRIVATE_VENDOR_ERROR')
+      report(phase,'passed')
+    contexts=[patch.object(bootstrap,'STATE',state),patch.object(bootstrap,'SESSION',session),patch.object(bootstrap,'Path',side_effect=vm_path),patch.object(bootstrap,'root_file',side_effect=lambda p:Path(p)),patch.object(bootstrap,'host'),patch.object(bootstrap,'verify_metadata',side_effect=metadata),patch.object(bootstrap,'apt_sources'),patch.object(bootstrap,'validate_apt_sources'),patch.object(bootstrap,'refresh_indexes',side_effect=Refused('DUMMY_PRIVATE_APT_PARTIAL_FAILURE')),patch.object(bootstrap,'run',side_effect=lambda args,timeout=1200:commands.append(args)),patch.object(bootstrap,'emit',side_effect=emit),patch.object(bootstrap.fcntl,'flock'),patch.object(bootstrap.time,'time',return_value=now),patch.object(bootstrap.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='')),patch.object(sys,'argv',['bootstrap.py','--execute']),redirect_stdout(output),redirect_stderr(output)]
+    with ExitStack() as stack:
+     for context in contexts:stack.enter_context(context)
+     install=stack.enter_context(patch.object(bootstrap,'install'))
+     with self.assertRaises(Refused):bootstrap.main()
+     install.assert_not_called()
+    stored=json.loads(state.read_text());self.assertEqual(stored['phase'],'failed');self.assertEqual(stored['failurePhase'],failed);self.assertEqual(stored['deadlineUTC'],m['deadlineUTC']);self.assertEqual(events[-1]['phase'],failed);self.assertEqual(events[-1]['status'],'failed')
+    self.assertNotIn(['systemctl','reboot'],commands);self.assertFalse(any(e['phase']=='installing' for e in events));self.assertNotIn('DUMMY_PRIVATE',json.dumps(stored)+json.dumps(events)+output.getvalue());self.assertIsNone(bootstrap._BUDGET)
  def test_keyless_console_events_project_only_context_and_allowlisted_stage(self):
   m=self.fixture();at=dt.datetime.fromisoformat(m['createdAt'].replace('Z','+00:00')).timestamp()+1
   raw=diagnostics.event(m,'bootstrap','driver-check','failed',at)

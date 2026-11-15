@@ -11,7 +11,7 @@ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const FIELDS=['version','sessionId','nonce','component','phase','status','at','deadline'];
 const RECEIPT_FIELDS=['version','provider','kind','state','sessionId','nonce','deadline','allocationId','observedAt','events','diagnosticOnly'];
 const PHASES=Object.freeze({
-  bootstrap:new Set(['new','metadata-review','installing','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']),
+  bootstrap:new Set(['new','metadata-review','metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','installing','package-resolve','package-download','package-verify','package-install','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']),
   runtime:new Set(['preparing','image-pull','connector-install','host-boundary-probe','sealing','container-create','native-boundary','model-free-preflight','awaiting-provider-firewall-permit','model-starting','ready'])
 });
 const plain=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);

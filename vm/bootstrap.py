@@ -3,20 +3,90 @@
 Only a separately approved, disposable Ubuntu24 VM may invoke --execute.
 The manifest's original absolute deadline survives all stages and the one reboot.
 """
-import argparse,fcntl,hashlib,json,os,platform,re,shutil,subprocess,sys,time,urllib.parse
+import argparse,fcntl,hashlib,json,os,platform,re,selectors,shutil,signal,subprocess,sys,time,urllib.parse
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from host_policy import Refused,root_file,manifest_from,progress,atomic,deadline_units
-from metadata import verify,records
+from host_policy import Refused,root_file,manifest_from,progress,atomic,deadline_units,timestamp
+from metadata import records
 from console_diagnostics import emit
 HERE=Path(__file__).resolve().parent
 STATE=Path('/var/lib/unjailed/bootstrap.json');SESSION=Path('/etc/unjailed/session.json')
 ENV={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND':'noninteractive','LC_ALL':'C'}
+METADATA_SECONDS=120
+APT_REFRESH_SECONDS=120
+MAX_COMMAND_OUTPUT=1024*1024
+_BUDGET=None
 
-def run(args,timeout=1200):
-    r=subprocess.run(args,env=ENV,capture_output=True,text=True,timeout=timeout)
-    if r.returncode:raise Refused('Trusted bootstrap command failed: '+args[0])
-    return r.stdout
+class StartupBudget:
+    def __init__(self,m):
+        manifest_from(m);created,expiry=timestamp(m['createdAt']),timestamp(m['deadlineUTC'])
+        self.expiry=min(expiry,created+min(900,expiry-created-120))
+        self.wall,self.mono=time.time(),time.monotonic()
+    def remaining(self):
+        remaining=self.expiry-max(time.time(),self.wall+time.monotonic()-self.mono)
+        if remaining<=0:raise Refused('Original bootstrap startup deadline reached')
+        return remaining
+
+def run(args,timeout=1200,line_callback=None):
+    # A socket's timeout is not an overall download deadline. Supervise the
+    # complete trusted operation, including DNS, slow reads and its children.
+    if type(timeout) not in (int,float) or not 0<timeout<=1200:raise Refused('Invalid bootstrap command deadline')
+    if _BUDGET is not None:timeout=min(timeout,_BUDGET.remaining())
+    deadline=time.monotonic()+timeout;output=bytearray();pending=bytearray();complete=False
+    process=subprocess.Popen(args,env=ENV,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+    try:
+        with selectors.DefaultSelector() as selector:
+            os.set_blocking(process.stdout.fileno(),False);selector.register(process.stdout,selectors.EVENT_READ)
+            while selector.get_map() or process.poll() is None:
+                remaining=deadline-time.monotonic()
+                if _BUDGET is not None:remaining=min(remaining,_BUDGET.remaining())
+                if remaining<=0:raise Refused('Trusted bootstrap command timed out')
+                for key,_ in selector.select(min(.1,remaining)):
+                    data=os.read(key.fd,65536)
+                    if not data:selector.unregister(key.fileobj);continue
+                    output.extend(data)
+                    if len(output)>MAX_COMMAND_OUTPUT:raise Refused('Trusted bootstrap output exceeds bound')
+                    if line_callback is not None:
+                        pending.extend(data)
+                        while b'\n' in pending:
+                            line,_,rest=pending.partition(b'\n');pending=bytearray(rest)
+                            line_callback(line.decode('ascii'))
+                        if len(pending)>1024:raise Refused('Trusted bootstrap progress exceeds bound')
+            if line_callback is not None and pending:raise Refused('Incomplete trusted bootstrap progress')
+        if process.wait()!=0:raise Refused('Trusted bootstrap command failed')
+        complete=True;return output.decode('utf-8')
+    finally:
+        if not complete:
+            # Only this newly created process group. Never remove APT locks,
+            # signal another installer, or continue using partial output.
+            try:os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+        process.stdout.close()
+        try:process.wait(timeout=2)
+        except subprocess.TimeoutExpired:raise Refused('Trusted bootstrap child cleanup refused')
+
+def verify_metadata(report):
+    phases={'metadata-cuda','metadata-toolkit','metadata-docker'};states={};done=False
+    def line(value):
+        nonlocal done
+        if value=='UNJAILED_METADATA_VERIFIED':
+            if done or set(states)!=phases or any(v!='passed' for v in states.values()):raise Refused('Incomplete vendor metadata proof')
+            done=True;return
+        if done or not value.startswith('UNJAILED_METADATA '):raise Refused('Unexpected vendor metadata progress')
+        try:event=json.loads(value.removeprefix('UNJAILED_METADATA '))
+        except (ValueError,TypeError):raise Refused('Invalid vendor metadata progress')
+        if not isinstance(event,dict) or set(event)!={'phase','status'} or not isinstance(event['phase'],str) or event['phase'] not in phases or event['status'] not in ('running','passed','failed'):raise Refused('Invalid vendor metadata progress')
+        phase,status=event['phase'],event['status'];previous=states.get(phase)
+        if (status=='running' and previous is not None) or (status!='running' and previous!='running'):raise Refused('Invalid vendor metadata transition')
+        states[phase]=status;report(phase,status)
+    run([sys.executable,'-I','-B',str(HERE/'metadata.py'),'--progress'],timeout=METADATA_SECONDS,line_callback=line)
+    if not done:raise Refused('Vendor metadata verification incomplete')
+
+def apt_refresh_arguments():
+    return ['apt-get','--error-on=any','-o','Acquire::Retries=0','-o','Acquire::http::Timeout=20','-o','Acquire::https::Timeout=20','-o','APT::Get::AllowUnauthenticated=false','-o','Acquire::AllowInsecureRepositories=false','-o','Acquire::AllowDowngradeToInsecureRepositories=false','update']
+
+def refresh_indexes():
+    return run(apt_refresh_arguments(),timeout=APT_REFRESH_SECONDS)
 
 def host():
     if os.geteuid()!=0 or sys.platform!='linux' or platform.machine()!='x86_64':raise Refused('Dedicated amd64 Linux root host required')
@@ -67,22 +137,28 @@ def resolve(lock,kernel):
         p=candidates[0];selected.append({'name':name,'version':version,'architecture':p['Architecture'],'sha256':p['SHA256']})
     return roots,selected
 
-def install(lock,kernel):
+def install(lock,kernel,report=None):
     # apt-get uses authenticated Ubuntu/vendor metadata; no insecure override.
+    if report:report('package-resolve')
     roots,selected=resolve(lock,kernel);atomic('/var/lib/unjailed/resolved-packages.json',{'kernel':kernel,'packages':selected})
+    if report:report('package-resolve','passed')
     cache=Path('/var/lib/unjailed/packages');cache.mkdir(mode=0o700,exist_ok=True);archives=cache/'archives';archives.mkdir(mode=0o755,exist_ok=True)
     opts=['-o','Dir::Cache='+str(cache),'-o','Dir::Cache::archives='+str(archives),'-o','APT::Get::AllowUnauthenticated=false','-o','Acquire::AllowInsecureRepositories=false']
+    if report:report('package-download')
     run(['apt-get',*opts,'--yes','--download-only','--no-install-recommends','install',*roots])
+    if report:report('package-download','passed');report('package-verify')
     expected={(p['name'],p['version'],p['architecture']):p for p in selected};seen=set()
     for file in archives.glob('*.deb'):
         fields=[run(['dpkg-deb','--field',str(file),name]).strip() for name in ['Package','Version','Architecture']];key=tuple(fields)
         if key not in expected or hashlib.sha256(file.read_bytes()).hexdigest()!=expected[key]['sha256']:raise Refused('Downloaded package does not match reviewed target lock')
         seen.add(key)
     if seen!=set(expected):raise Refused('Target package closure incomplete')
+    if report:report('package-verify','passed');report('package-install')
     run(['apt-get',*opts,'--yes','--no-download','--no-install-recommends','install',*roots])
     run(['apt-mark','hold',*[p['name'] for p in lock['packages']]])
     for p in lock['packages']:
         if run(['dpkg-query','--show','--showformat=${Version}',p['name']]).strip()!=p['version']:raise Refused('Installed vendor version mismatch')
+    if report:report('package-install','passed')
 
 def kernel_probe(lock,kernel):
     expected=lock['driver_version']
@@ -95,7 +171,14 @@ def kernel_probe(lock,kernel):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--execute',action='store_true');args=parser.parse_args()
     if not args.execute:raise Refused('Preparation only; explicit approved VM execution required')
-    m=manifest_from(json.loads(root_file(SESSION).read_text()));emit(m,'bootstrap','new')
+    m=manifest_from(json.loads(root_file(SESSION).read_text()))
+    global _BUDGET
+    previous_budget=_BUDGET;_BUDGET=StartupBudget(m)
+    try:return bootstrap(m)
+    finally:_BUDGET=previous_budget
+
+def bootstrap(m):
+    emit(m,'bootstrap','new')
     try:host()
     except Exception:
         emit(m,'bootstrap','new','failed');raise
@@ -118,8 +201,10 @@ def main():
             for name,text in deadline_units(m).items():Path('/etc/systemd/system',name).write_text(text)
             run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','unjailed-deadline.timer'])
             if state['phase']=='new':
-                atomic(STATE,state);report('metadata-review');verify(lock);apt_sources(lock);validate_apt_sources();run(['apt-get','-o','APT::Get::AllowUnauthenticated=false','update']);save('installing')
-                install(lock,platform.release());save('awaiting-reboot')
+                atomic(STATE,state);report('metadata-review');verify_metadata(report);report('metadata-review','passed')
+                report('apt-source-review');apt_sources(lock);validate_apt_sources();report('apt-source-review','passed')
+                report('apt-index-refresh');refresh_indexes();report('apt-index-refresh','passed');save('installing')
+                install(lock,platform.release(),report=report);save('awaiting-reboot')
                 shutil.copyfile(HERE/'bootstrap.service','/etc/systemd/system/unjailed-bootstrap.service')
                 run(['systemctl','daemon-reload']);run(['systemctl','enable','unjailed-bootstrap.service']);run(['systemctl','reboot']);return
             if state['phase']=='installing':raise Refused('Interrupted installation requires operator review; no automatic reinstall')

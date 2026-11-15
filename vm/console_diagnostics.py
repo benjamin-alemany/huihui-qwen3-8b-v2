@@ -9,7 +9,7 @@ from host_policy import manifest_from,timestamp
 
 PREFIX='UNJAILED_HOST_EVENT '
 PHASES={
- 'bootstrap':frozenset(['new','metadata-review','installing','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']),
+ 'bootstrap':frozenset(['new','metadata-review','metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','installing','package-resolve','package-download','package-verify','package-install','awaiting-reboot','driver-check','docker-runtime-config','docker-start','host-ready-model-not-started']),
  'runtime':frozenset(['preparing','image-pull','connector-install','host-boundary-probe','sealing','container-create','native-boundary','model-free-preflight','awaiting-provider-firewall-permit','model-starting','ready'])}
 DEVICES=('/dev/console','/dev/ttyS0','/dev/tty1')
 

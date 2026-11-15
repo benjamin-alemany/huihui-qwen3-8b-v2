@@ -20,6 +20,14 @@ function setup(){
   }};return {s,args,q,p};
 }
 
+test('fixed vendor/APT/package substages remain diagnostic-only and reject arbitrary stage or error text',()=>{
+ const q=reservation(),phases=['metadata-cuda','metadata-toolkit','metadata-docker','apt-source-review','apt-index-refresh','package-resolve','package-download','package-verify','package-install'];
+ for(const phase of phases){
+  for(const status of ['running','passed','failed']){const e=event(q,{component:'bootstrap',phase,status}),parsed=parseHostEvents(PREFIX+JSON.stringify(e),{reservation:q,sessionId:SESSION,observedAt:NOW});assert.deepEqual(parsed,[e]);}
+ }
+ for(const patch of [{phase:'apt-index-refresh '+SECRET},{phase:'metadata-'+SECRET},{phase:'apt-index-refresh',error:SECRET}])assert.deepEqual(parseHostEvents(PREFIX+JSON.stringify(event(q,{component:'bootstrap',...patch})),{reservation:q,sessionId:SESSION,observedAt:NOW}),[]);
+});
+
 test('console reader uses official fixed async endpoint with fresh ACTIVE ownership before POST and GET',async()=>{
   const {s,args,q,p}=setup(),r=await collectHostDiagnostics(args);
   assert.deepEqual(r,{version:1,provider:'hyperstack',kind:'host-console-progress-v1',state:'available',sessionId:SESSION,nonce:q.nonce,deadline:q.deadline,allocationId:'44',observedAt:NOW,events:[event(q)],diagnosticOnly:true});

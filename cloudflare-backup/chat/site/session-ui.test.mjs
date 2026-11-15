@@ -36,6 +36,24 @@ async function sessionUi(steps){
 }
 const idleState=(patch={})=>({launchEnabled:true,session:null,ordinaryBudget:{remainingUSD:1},...patch});
 const liveQuote=()=>({id:'fresh',live:true,launchEnabled:true,availability:'AVAILABLE',minutes:DEFAULT_MINUTES,expiresAt:Date.now()+60000,maximumUSD:.3,totalHourlyUSD:.5});
+test('rendered quote and consent round the ceiling up while Start preserves the exact quoted value',async()=>{
+ const maximumUSD=.7914202509,quote={...liveQuote(),maximumUSD,totalHourlyUSD:1.35672043},state=idleState({ordinaryBudget:{remainingUSD:.7999999999,reservedUSD:0}});
+ const ui=await sessionUi([{path:'/api/controller/status',body:state},{path:'/api/controller/status',body:state},{path:'/api/session/quote',body:quote},{path:'/api/session/start',body:state},{path:'/api/controller/status',body:state}]);
+ await ui.click('quote');assert.equal(ui.element('quote-price').textContent,`$1.36/hour · ${DEFAULT_MINUTES}-minute timer · reserve up to $0.80`);assert.equal(ui.element('consent-label').textContent,'I approve up to $0.80 for this timed session.');assert.match(ui.element('budget').textContent,/remaining: \$0\.79 ·/);
+ ui.element('accept-cost').checked=true;ui.change('accept-cost');assert.equal(ui.element('start-session').disabled,false);await ui.click('start-session');assert.deepEqual(ui.calls.find(c=>c.path==='/api/session/start').body,{quoteId:quote.id,maximumUSD});
+});
+test('whole ledger-unit display keeps exact cents stable and discloses tiny positive ceilings',async()=>{
+ for(const [maximumUSD,label]of [[.07,'$0.07'],[1e-10,'$0.01']]){
+  const state=idleState({ordinaryBudget:{remainingUSD:.07,reservedUSD:0}}),ui=await sessionUi([{path:'/api/controller/status',body:state},{path:'/api/controller/status',body:state},{path:'/api/session/quote',body:{...liveQuote(),maximumUSD}}]);
+  await ui.click('quote');assert(ui.element('quote-price').textContent.endsWith('reserve up to '+label));assert.equal(ui.element('consent-label').textContent,`I approve up to ${label} for this timed session.`);assert.match(ui.element('budget').textContent,/remaining: \$0\.07 ·/);
+ }
+});
+test('invalid negative or nonfinite amounts are not formatted as spendable funds and existing Start checks remain closed',async()=>{
+ for(const invalid of [-.01,NaN,Infinity]){
+  const state=idleState({ordinaryBudget:{remainingUSD:invalid,reservedUSD:0}}),ui=await sessionUi([{path:'/api/controller/status',body:state},{path:'/api/controller/status',body:state},{path:'/api/session/quote',body:{...liveQuote(),maximumUSD:invalid}}]);
+  await ui.click('quote');ui.element('accept-cost').checked=true;ui.change('accept-cost');assert.match(ui.element('budget').textContent,/remaining: Unavailable ·/);assert.equal(ui.element('consent-label').textContent,'I approve up to Unavailable for this timed session.');assert.equal(ui.element('start-session').disabled,true);assert(!ui.calls.some(c=>c.path==='/api/session/start'));
+ }
+});
 test('Review session cost refreshes a stale launch lock before quoting and still requires fresh consent',async()=>{
  const ui=await sessionUi([{path:'/api/controller/status',body:idleState({launchEnabled:false})},{path:'/api/controller/status',body:idleState()},{path:'/api/session/quote',body:liveQuote()}]);
  assert.equal(ui.element('start-session').disabled,true);ui.element('accept-cost').checked=true;

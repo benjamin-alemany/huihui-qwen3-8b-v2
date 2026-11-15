@@ -1,5 +1,5 @@
 """Verify small vendor metadata only. Never downloads/executes a package payload."""
-import gzip,hashlib,io,json,re,subprocess,tempfile,urllib.request
+import argparse,gzip,hashlib,io,json,re,subprocess,tempfile,urllib.request
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
 class Refused(ValueError): pass
@@ -40,9 +40,12 @@ def verify_index(release,index,name,algorithm):
     matches=[r for r in rows if r[2]==name]
     if len(matches)!=1 or int(matches[0][1])!=len(index) or hashlib.new(algorithm,index).hexdigest()!=matches[0][0]:raise Refused('Signed index digest mismatch')
 
-def verify(lock,read=fetch,gpgv='gpgv'):
+def verify(lock,read=fetch,gpgv='gpgv',report=None):
     proofs={}
     for name,repo in lock['repositories'].items():
+        phase='metadata-'+name
+        if name not in ('cuda','toolkit','docker'):raise Refused('Unreviewed vendor metadata phase')
+        if report:report(phase,'running')
         key=HERE/'keys'/(name+'.gpg')
         if hashlib.sha256(key.read_bytes()).hexdigest()!=repo['key_sha256']:raise Refused('Vendor key bytes changed')
         base=repo.get('release_base',repo['base'])
@@ -62,5 +65,18 @@ def verify(lock,read=fetch,gpgv='gpgv'):
             candidates=[r for r in available if (r.get('Package'),r.get('Version'),r.get('Architecture'))==(p['name'],p['version'],p['architecture'])]
             if not any(r.get('SHA256')==p['sha256'] and int(r['Size'])==p['size'] and r['Filename']==p['filename'] for r in candidates):raise Refused('Pinned package missing or changed')
         proofs[name]={'signature_verified':True,'index_digest_verified':True,'inrelease_sha256':hashlib.sha256(release).hexdigest()}
+        if report:report(phase,'passed')
     return proofs
-if __name__=='__main__':print(json.dumps(verify(json.loads((HERE/'packages.lock.json').read_text())),sort_keys=True))
+def main():
+    parser=argparse.ArgumentParser();parser.add_argument('--progress',action='store_true');args=parser.parse_args();phase=None
+    def report(current,status):
+        nonlocal phase
+        phase=current
+        print('UNJAILED_METADATA '+json.dumps({'phase':current,'status':status},sort_keys=True,separators=(',',':')),flush=True)
+    try:
+        result=verify(json.loads((HERE/'packages.lock.json').read_text()),report=report if args.progress else None)
+        print('UNJAILED_METADATA_VERIFIED' if args.progress else json.dumps(result,sort_keys=True),flush=True)
+    except Exception:
+        if args.progress and phase is not None:report(phase,'failed')
+        raise SystemExit('Trusted vendor metadata verification refused')
+if __name__=='__main__':main()
