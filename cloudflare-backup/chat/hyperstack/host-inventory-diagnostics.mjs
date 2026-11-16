@@ -9,13 +9,13 @@ import {HOST_INVENTORY_PROFILE,HOST_INVENTORY_SERVING_IMAGE} from './host-invent
 export const HOST_INVENTORY_PREFIX='UNJAILED_HOST_INVENTORY ';
 export const HOST_INVENTORY_FAILURE_PREFIX='UNJAILED_HOST_INVENTORY_FAILURE ';
 const MAX_RESPONSE=512*1024,MAX_LINE=65536,REQUEST_MS=8000,OPERATION_MS=30000;
-const MAX_FILE_BYTES=256*1024**2,MAX_TOTAL_BYTES=768*1024**2;
+const MAX_FILE_BYTES=256*1024**2,MAX_TOTAL_BYTES=1536*1024**2;
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const HASH=/^[a-f0-9]{64}$/,KERNEL=/^[A-Za-z0-9][A-Za-z0-9.+-]{0,99}$/;
 const VERSION=/^[A-Za-z0-9][A-Za-z0-9.+:~_-]{0,99}$/,DRIVER=/^570\.[0-9]{1,3}\.[0-9]{1,3}$/;
 const UTILITIES=Object.freeze(['/usr/bin/python3','/usr/bin/docker','/usr/bin/nvidia-ctk','/usr/bin/nvidia-container-cli','/usr/bin/nvidia-smi','/usr/bin/nsenter','/usr/bin/unshare','/usr/bin/setpriv','/usr/bin/mount','/usr/bin/umount','/usr/sbin/nft','/usr/sbin/ip','/usr/sbin/modinfo','/usr/sbin/modprobe','/usr/bin/systemctl','/usr/bin/bash','/usr/bin/dpkg','/usr/bin/dpkg-query','/usr/bin/uname'].sort());
 const UTILITY_PACKAGES=new Set(['docker-ce','docker-ce-cli','docker.io','containerd.io','containerd','runc','nvidia-container-toolkit','nvidia-container-toolkit-base','libnvidia-container1','libnvidia-container-tools','nftables','iproute2','util-linux','mount','kmod','systemd','bash','dpkg','coreutils','libseccomp2','python3-minimal','python3.12-minimal','libpython3.12-minimal']);
-const NVIDIA_PACKAGE=/^(?:nvidia-(?:driver|headless|headless-no-dkms|dkms|kernel-common|kernel-source|utils|compute-utils)-570(?:-server)?(?:-open)?|libnvidia-(?:compute|common|extra|decode|encode|fbc1|gl)-570(?:-server)?|nvidia-firmware-570(?:-server)?-[0-9]+(?:\.[0-9]+){1,3}|cuda-drivers-570|linux-(?:modules|objects|signatures)-nvidia-570(?:-server)?(?:-open)?-[A-Za-z0-9.+-]+)$/;
+const NVIDIA_PACKAGE=/^(?:nvidia-(?:driver|headless|headless-no-dkms|dkms|kernel-common|kernel-source|utils|compute-utils)-570(?:-server)?(?:-open)?|libnvidia-(?:compute|common|extra|decode|encode|fbc1|gl)-570(?:-server)?|nvidia-firmware-570(?:-server)?(?:-[0-9]+(?:\.[0-9]+){1,3})?|cuda-drivers-570|linux-(?:modules|objects|signatures)-nvidia-570(?:-server)?(?:-open)?-[A-Za-z0-9.+-]+)$/;
 const GPU_LIBRARY=/^\/usr\/lib\/(?:x86_64-linux-gnu|x86_64-linux-gnu\/nvidia\/current)\/lib(?:cuda|cudadebugger|nvidia-[a-z0-9-]+)\.so(?:\.[0-9]+)*$/;
 const GPU_BINARY=new Set(['/usr/bin/nvidia-cuda-mps-control','/usr/bin/nvidia-cuda-mps-server']);
 const HOST_EXECUTABLES=new Set(['/usr/bin/dockerd','/usr/bin/containerd','/usr/bin/runc','/usr/bin/nvidia-container-runtime','/usr/bin/nvidia-container-runtime-hook']);

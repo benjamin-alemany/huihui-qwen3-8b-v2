@@ -158,5 +158,35 @@ class PreparedHostTests(unittest.TestCase):
         with self.assertRaises(Refused) as caught:host.collect_inventory(f.session,**{**f.kwargs(),'runner':failing})
         self.assertNotIn('DUMMY_PRIVATE',str(caught.exception))
         with self.assertRaises(Refused):host.collect_inventory(f.session,**{**f.kwargs(),'runner':lambda *_:'x'*(host.MAX_OUTPUT+1)})
+    def test_measured_stack_fits_finite_aggregate_while_file_and_record_limits_remain(self):
+        base=NativeFixture().proposal()
+        def sized(total):
+            value=copy.deepcopy(base);remaining=total-sum(f['size'] for f in value['files']);index=0
+            while remaining:
+                size=min(remaining,256*1024**2)
+                value['files'].append({'path':'/usr/lib/x86_64-linux-gnu/libnvidia-footprint-'+str(index)+'.so.1','package':'libnvidia-compute-570','sha256':'1'*64,'size':size})
+                remaining-=size;index+=1
+            value['files'].sort(key=lambda f:f['path']);return value
+        # Integer metadata only: do not allocate gigabytes of dummy file bytes.
+        self.assertLess(len(host.canonical_inventory(sized(816047744))),65536)
+        self.assertLess(len(host.canonical_inventory(sized(1536*1024**2))),65536)
+        with self.assertRaises(Refused):host.canonical_inventory(sized(1536*1024**2+1))
+        oversized=copy.deepcopy(base);oversized['files'][0]['size']=256*1024**2+1
+        with self.assertRaises(Refused):host.canonical_inventory(oversized)
+        crowded=copy.deepcopy(base)
+        while len(crowded['files'])<97:
+            index=len(crowded['files']);crowded['files'].append({'path':'/usr/lib/x86_64-linux-gnu/libnvidia-count-'+str(index)+'.so.1','package':'libnvidia-compute-570','sha256':'1'*64,'size':1})
+        crowded['files'].sort(key=lambda f:f['path'])
+        with self.assertRaises(Refused):host.canonical_inventory(crowded)
+    def test_plain_and_versioned_r570_firmware_payloads_are_observed_without_auto_approval(self):
+        for name in ['nvidia-firmware-570','nvidia-firmware-570-server','nvidia-firmware-570-570.999.01','nvidia-firmware-570-server-570.999.01']:
+            f=NativeFixture();path='/usr/lib/firmware/nvidia/'+f.driver+'/gsp_ga10x.bin'
+            f.package_versions[name]=f.driver+'-dummy';f.package_files[name]=[path];f.data[path]=b'DUMMY_PUBLIC_FIRMWARE'
+            f.details[path]={'path':path,'uid':0,'mode':0o444,'size':len(f.data[path]),'regular':True}
+            with self.subTest(name=name):
+                proposal=f.proposal();self.assertIn(name,[p['name'] for p in proposal['packages']]);self.assertEqual(next(item['package'] for item in proposal['files'] if item['path']==path),name)
+                self.assertTrue(proposal['provenanceReviewRequired']);self.assertFalse(proposal['modelLoaded']);self.assertFalse(proposal['cudaValidated'])
+        for name in ['nvidia-firmware-580','nvidia-firmware-570evil','nvidia-firmware-570-server-evil','nvidia-firmware-570-open','nvidia-firmware-570-1']:
+            self.assertFalse(host._package_allowed(name,'6.8.0-dummy'))
 
 if __name__=='__main__':unittest.main()

@@ -94,6 +94,29 @@ test('a full bounded file inventory and duplicate console devices survive captur
  assert.deepEqual(parseHostInventory(f.logs,f.binding),f.receipt);
  f.logs=f.logs.repeat(3);const h=collector(f);assert.deepEqual(await collectHostInventory(h.options),f.receipt);
 });
+test('measured full-driver stack fits a finite 1.5 GiB bound with unchanged per-file and record bounds',()=>{
+ const base=fixture();
+ function sized(total){
+  const f=fixture(),inventory=f.receipt.inventory;let remaining=total-inventory.files.reduce((n,file)=>n+file.size,0),index=0;
+  while(remaining){const size=Math.min(remaining,256*1024**2);inventory.files.push({path:'/usr/lib/x86_64-linux-gnu/libnvidia-footprint-'+(index++)+'.so.1',package:'libnvidia-compute-570',sha256:'1'.repeat(64),size});remaining-=size;}
+  inventory.files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);return f;
+ }
+ for(const total of [816047744,1536*1024**2]){const f=sized(total);const parsed=parseHostInventory(HOST_INVENTORY_PREFIX+canonical(f.receipt),f.binding);assert(parsed);assert.equal(parsed.modelPermitIssued,false);assert.equal(parsed.inventory.cudaValidated,false);}
+ const above=sized(1536*1024**2+1);assert.equal(parseHostInventory(HOST_INVENTORY_PREFIX+canonical(above.receipt),above.binding),null);
+ base.receipt.inventory.files[0].size=256*1024**2+1;assert.equal(parseHostInventory(HOST_INVENTORY_PREFIX+canonical(base.receipt),base.binding),null);
+ const crowded=fixture();while(crowded.receipt.inventory.files.length<97){const n=crowded.receipt.inventory.files.length;crowded.receipt.inventory.files.push({path:'/usr/lib/x86_64-linux-gnu/libnvidia-count-'+n+'.so.1',package:'libnvidia-compute-570',sha256:'1'.repeat(64),size:1});}
+ crowded.receipt.inventory.files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);assert.equal(parseHostInventory(HOST_INVENTORY_PREFIX+canonical(crowded.receipt),crowded.binding),null);
+});
+test('plain and versioned R570 firmware names match Python without admitting another driver branch',()=>{
+ for(const name of ['nvidia-firmware-570','nvidia-firmware-570-server','nvidia-firmware-570-570.195.03','nvidia-firmware-570-server-570.195.03']){
+  const f=fixture();f.receipt.inventory.packages.push({name,version:'570.195.03-0ubuntu1',architecture:'amd64'});f.receipt.inventory.packages.sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+  f.receipt.inventory.files.push({path:'/usr/lib/firmware/nvidia/570.195.03/gsp_ga10x.bin',package:name,sha256:'c'.repeat(64),size:63858416});f.receipt.inventory.files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+  const parsed=parseHostInventory(HOST_INVENTORY_PREFIX+canonical(f.receipt),f.binding);assert(parsed);assert.equal(parsed.inventory.provenanceReviewRequired,true);
+  const command='import json,sys\nsys.path.insert(0,sys.argv[1]);from prepared_host import canonical_inventory\ncanonical_inventory(json.load(sys.stdin));print("PYTHON_FIRMWARE_ACCEPTED")';
+  const run=spawnSync('python3',['-I','-B','-c',command,fileURLToPath(new URL('../../../vm/',import.meta.url))],{input:JSON.stringify(parsed.inventory),encoding:'utf8',timeout:5000});assert.equal(run.status,0,run.stderr);assert.match(run.stdout,/PYTHON_FIRMWARE_ACCEPTED/);
+ }
+ for(const name of ['nvidia-firmware-580','nvidia-firmware-570evil','nvidia-firmware-570-server-evil','nvidia-firmware-570-open','nvidia-firmware-570-1']){const f=fixture();f.receipt.inventory.packages[0].name=name;assert.equal(parseHostInventory(HOST_INVENTORY_PREFIX+canonical(f.receipt),f.binding),null);}
+});
 test('collector uses only the exact documented console API and validates the VM before and after capture',async()=>{
  const f=fixture(),{options,calls}=collector(f),result=await collectHostInventory(options);assert.deepEqual(result,f.receipt);
  assert.deepEqual(calls.map(call=>call.type),['read','fetch','read','fetch','read']);
