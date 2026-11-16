@@ -1,6 +1,6 @@
 import {parseOperatorBudget} from './budget-reconcile.mjs';
 import {DurableObject,WorkerEntrypoint} from 'cloudflare:workers';
-import {collectGuardReadiness,safeTailFailure,cloudflareTailClient} from './tails.mjs';
+import {collectGuardReadiness,collectPreflightHeartbeat,safeTailFailure,cloudflareTailClient} from './tails.mjs';
 import {SessionEngine} from './engine.mjs';
 import {parseTestCampaign} from './campaign.mjs';
 import {runpodClient} from './runpod.mjs';
@@ -13,6 +13,7 @@ import {reconcileControllerOperatorAbsence} from '../hyperstack/controller-opera
 import {parseOperatorRejection} from '../hyperstack/operator-rejection.mjs';
 import {reconcileControllerOperatorRejection} from '../hyperstack/controller-operator-rejection.mjs';
 import bootstrapBundle from '../../../release/bootstrap-payload.json' with {type:'json'};
+import {HOST_INVENTORY_RELEASE,HOST_INVENTORY_PAYLOAD,hostInventoryBootstrapReady,renderBoundHostInventory} from '../hyperstack/host-inventory-profile.mjs';
 const object=env=>env.SESSION_CONTROLLER.getByName('owner-chat-controller-v1');
 const operatorRecoveryActive=env=>env.OPERATOR_ABSENCE_RECONCILIATION_JSON!==undefined||env.OPERATOR_CREATE_REJECTION_JSON!==undefined;
 // Paid Start and the reviewed network-image gate remain locked in production.
@@ -26,6 +27,12 @@ export class ChatSessionController extends DurableObject {
     const selected=this.env.HOSTING_PROVIDER;
     if(selected===undefined||selected===''||selected==='runpod')return null;
     if(selected==='hyperstack'){
+      if(this.env.HOST_VALIDATION_PROFILE!==undefined){
+        const valid=this.env.HOST_VALIDATION_PROFILE==='host-inventory-v1';
+        return hyperstackControllerFactory({env:this.env,storage:this.ctx.storage,
+          release:valid?HOST_INVENTORY_RELEASE:{...HOST_INVENTORY_RELEASE,status:'unapproved'},bundle:HOST_INVENTORY_PAYLOAD,
+          renderBootstrap:renderBoundHostInventory,bootstrapReady:hostInventoryBootstrapReady,runtimeOrchestratorReady:hostInventoryBootstrapReady});
+      }
       // Prepared source and hash-bound bundle do not approve a paid launch.
       // Null acceptance/production pins and explicit owner authorization gates
       // remain independent of these callbacks and deployment flags.
@@ -50,21 +57,21 @@ export class ChatSessionController extends DurableObject {
       provider,guards:[this.env.PRIMARY_GUARD,this.env.BACKUP_GUARD],
       catalog:selected?selected.catalog:()=>connected?provider.catalog():Promise.resolve(JSON.parse(this.env.PREPARED_CATALOG)),
       wake:ms=>this.ctx.storage.setAlarm(now()+(ms??100)),
-      heartbeat:()=>collectGuardReadiness(this.env.CF_TAIL_TOKEN,null,{accountId:this.#tailAccountId(),heartbeatOnly:true}),
+      heartbeat:async()=>collectPreflightHeartbeat(this.env.CF_TAIL_TOKEN,{accountId:this.#tailAccountId(),cachedReadiness:await this.ctx.storage.get('readiness')}),
       receipts:q=>collectGuardReadiness(this.env.CF_TAIL_TOKEN,q,{accountId:this.#tailAccountId()}),
       checkVersions:async proof=>{const versions=await cloudflareTailClient(this.env.CF_TAIL_TOKEN,{accountId:this.#tailAccountId()}).versions();for(const r of Object.values(proof.guards))if(versions[r.worker]!==r.version)throw new SessionError('GUARD_VERSION_CHANGED');}
     });
   }
   async status(){
     const readiness=await this.ctx.storage.get('readiness')??{phase:'not-checked'},selected=this.#configuration();
-    return {...await this.engine().status(),readiness,networkBoundaryReady:selected?selected.readiness.sourceApproved&&selected.readiness.runtimeOrchestratorPrepared:networkReleaseReady(IMAGE),
+    return {...await this.engine().status(),readiness,networkBoundaryReady:selected?!selected.readiness.inventoryOnly&&selected.readiness.sourceApproved&&selected.readiness.runtimeOrchestratorPrepared:networkReleaseReady(IMAGE),
       hostingProvider:selected?.readiness.provider??'runpod',operatorRecovery:await this.ctx.storage.get('operator-absence-status-v1')??null,operatorCreateRejection:await this.ctx.storage.get('operator-create-rejection-status-v1')??null,...(selected?{providerReadiness:selected.readiness,launchBlockers:selected.readiness.blockers}:{})};
   }
   async quote(input){try{return await this.engine().quote(input);}catch(e){return {error:e instanceof SessionError?e.code:'QUOTE_UNAVAILABLE',status:e instanceof SessionError?e.status:503};}}
   async grant(input){try{return await this.engine().grant(input);}catch(e){return {error:e instanceof SessionError?e.code:'GRANT_REFUSED',status:e instanceof SessionError?e.status:409};}}
   async start(input){try{if(operatorRecoveryActive(this.env))throw new SessionError('OPERATOR_RECOVERY_ACTIVE');const selected=this.#configuration();if(selected){if(!selected.enabled)throw new SessionError(selected.readiness.blockers[0]??'LAUNCH_LOCKED',503);}else if(this.env.START_ENABLED==='true'&&!networkReleaseReady(IMAGE))throw new SessionError('NETWORK_BOUNDARY_UNVERIFIED');const r=await this.ctx.storage.get('readiness');if(['pending','checking'].includes(r?.phase))throw new SessionError('READINESS_CHECK_ACTIVE');return await this.engine().start(input);}catch(e){return {error:e instanceof SessionError?e.code:'START_REFUSED',status:e instanceof SessionError?e.status:409};}}
   async stop(input){try{return await this.engine().stop(input);}catch{return {error:'STOP_UNCONFIRMED',status:503};}}
-  context(){if(operatorRecoveryActive(this.env))return null;const selected=this.#configuration();if(selected&&(!selected.readiness.sourceApproved||!selected.readiness.runtimeOrchestratorPrepared||!selected.connected))return null;return this.engine().context();}
+  context(){if(operatorRecoveryActive(this.env))return null;const selected=this.#configuration();if(selected&&(selected.readiness.inventoryOnly||!selected.readiness.sourceApproved||!selected.readiness.runtimeOrchestratorPrepared||!selected.connected))return null;return this.engine().context();}
   async check(){
     if(!terminal((await this.engine().read()).session))throw new SessionError('SESSION_ALREADY_ACTIVE');
     if(this.env.READINESS_ENABLED!=='true'||!this.env.CF_TAIL_TOKEN)throw Error('Cloud guard verification is not configured');

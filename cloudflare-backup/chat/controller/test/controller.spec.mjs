@@ -44,6 +44,18 @@ it('persists one pending free check across handles and refuses duplicate schedul
   expect(JSON.stringify(restored)).not.toContain('DUMMY_');
   await runInDurableObject(a,(_,ctx)=>ctx.storage.deleteAlarm());
 });
+it('preflight reads only its verified DO heartbeat cache and rechecks deployments without renewing evidence',async()=>{
+ const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID()),now=Date.now(),account='1'.repeat(32),workers={primary:'unjailed-chat-stop-primary',backup:'unjailed-chat-stop-backup'},versions={primary:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',backup:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'};
+ const cache={id:crypto.randomUUID(),phase:'verified',requestedAt:now-1000,expiresAt:now-1000+170000,finishedAt:now-100,schedulerReady:false,heartbeatVerified:true,requiresExactReservation:true,guards:Object.fromEntries(Object.entries(workers).map(([role,worker])=>[role,{role,worker,version:versions[role],eventTimestamp:now-500,mode:'unarmed-heartbeat'}]))};
+ await runInDurableObject(a,async(instance,ctx)=>{instance.env={...instance.env,CLOUDFLARE_ACCOUNT_ID:account,CF_TAIL_TOKEN:'D'.repeat(40)};await ctx.storage.put('readiness',cache);});
+ const calls=[],spy=vi.spyOn(globalThis,'fetch').mockImplementation(async(url,options)=>{
+  const value=String(url);calls.push(value);expect(options.method).toBe('GET');const role=Object.keys(workers).find(role=>value===`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${workers[role]}/deployments`);expect(role).toBeTruthy();return Response.json({success:true,result:{deployments:[{versions:[{version_id:versions[role],percentage:100}]}]}});
+ });
+ try{
+  const result=await runInDurableObject(a,instance=>instance.engine().d.heartbeat());expect(result.schedulerReady).toBe(false);expect(result.requiresExactReservation).toBe(true);expect(calls.length).toBe(2);
+  await runInDurableObject(a,async(_,ctx)=>{expect(await ctx.storage.get('readiness')).toEqual(cache);expect(await ctx.storage.get('session-ledger-v1')).toBeUndefined();});
+ }finally{spy.mockRestore();}
+});
 
 it('runs the readiness alarm deterministically with only dummy Cloudflare responses',async()=>{
  const a=env.SESSION_CONTROLLER.getByName(crypto.randomUUID()),calls=[];

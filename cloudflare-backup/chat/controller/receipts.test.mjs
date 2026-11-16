@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {GUARDS,activeVersion,receiptFrom,verifyGuardReceipts} from './receipts.mjs';
-import {cloudflareTailClient,collectGuardReadiness,tailURL,safeTailFailure} from './tails.mjs';
+import {GUARDS,activeVersion,receiptFrom,verifyGuardReceipts,reusableGuardHeartbeat} from './receipts.mjs';
+import {cloudflareTailClient,collectGuardReadiness,collectPreflightHeartbeat,tailURL,safeTailFailure} from './tails.mjs';
 const now=Date.parse('2026-11-03T03:22:00Z');
 const versions=Object.fromEntries(Object.values(GUARDS).map((w,i)=>[w,`${i}1111111-1111-4111-8111-111111111111`]));
 const reservation={name:'qwen-chat-session-'+'a'.repeat(16),image:'ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:'+'b'.repeat(64),windowStart:new Date(now-60000).toISOString(),windowEnd:new Date(now+120000).toISOString()};
@@ -19,6 +19,22 @@ test('unarmed heartbeat cannot authorize a reservation or a Pod launch',()=>{
   const e=event('primary',true);assert.equal(receiptFrom(e,versions,reservation,{now}),null);
   const receipt=receiptFrom(e,versions,null,{now,heartbeatOnly:true});assert.equal(receipt.mode,'unarmed-heartbeat');
   assert.throws(()=>verifyGuardReceipts(reservation,versions,[e,event('backup',true)],{now}));
+});
+function cachedReadiness(){
+ return {id:'22222222-2222-4222-8222-222222222222',phase:'verified',requestedAt:now-2000,expiresAt:now-2000+170000,finishedAt:now-500,schedulerReady:false,heartbeatVerified:true,requiresExactReservation:true,guards:Object.fromEntries(['primary','backup'].map(role=>[role,{role,worker:GUARDS[role],version:versions[GUARDS[role]],eventTimestamp:now-1000,mode:'unarmed-heartbeat'}]))};
+}
+test('fresh verified heartbeat cache binds both fixed workers and current versions without renewing time or granting launch',()=>{
+ const cache=cachedReadiness(),before=structuredClone(cache),result=reusableGuardHeartbeat(cache,versions,{now});
+ assert(result);assert.equal(result.schedulerReady,false);assert.equal(result.heartbeatVerified,true);assert.equal(result.requiresExactReservation,true);assert.deepEqual(result.guards,cache.guards);assert.deepEqual(cache,before);
+ assert.notEqual(result.guards,cache.guards);assert.notEqual(result.guards.primary,cache.guards.primary);
+ const boundary=cachedReadiness();boundary.guards.primary.eventTimestamp=now-90000;assert(reusableGuardHeartbeat(boundary,versions,{now}));
+ assert.throws(()=>verifyGuardReceipts(reservation,versions,[event('primary',true),event('backup',true)],{now}));
+});
+test('stale/future/incomplete/armed/unverified caches and changed deployments cannot skip live collection',()=>{
+ for(const mutate of [c=>{c.phase='checking';},c=>{c.phase='failed';},c=>{c.heartbeatVerified=false;},c=>{c.schedulerReady=true;},c=>{c.requiresExactReservation=false;},c=>{c.id='bad';},c=>{c.finishedAt=now+1;},c=>{c.finishedAt=now-90001;},c=>{c.requestedAt=now;},c=>{c.expiresAt=now;},c=>{delete c.guards.backup;},c=>{c.guards.other=c.guards.backup;},c=>{c.guards.primary.role='backup';},c=>{c.guards.primary.worker='other-worker';},c=>{c.guards.primary.mode='reservation';},c=>{c.guards.primary.eventTimestamp=now-90001;},c=>{c.guards.backup.eventTimestamp=now+1;},c=>{c.guards.backup.eventTimestamp=now-.1;},c=>{c.guards.primary.version='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';},c=>{c.guards.primary.nonce='a'.repeat(32);},c=>{c.guards.primary.token='DUMMY_PRIVATE';}]){
+  const cache=cachedReadiness();mutate(cache);assert.equal(reusableGuardHeartbeat(cache,versions,{now}),null);
+ }
+ const current={...versions,[GUARDS.backup]:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'};assert.equal(reusableGuardHeartbeat(cachedReadiness(),current,{now}),null);assert.equal(reusableGuardHeartbeat(cachedReadiness(),versions,{now:now-1.1}),null);
 });
 test('sanitized scheduled-tail fixtures require their matching versions and time',()=>{
   const base=new URL('./test/fixtures/guard-receipts/',import.meta.url);
@@ -59,6 +75,20 @@ test('tail collection uses two pinned APIs, no token on sockets, and always clea
 test('heartbeat-only collection explicitly refuses launch readiness',async()=>{
   const t=transport({heartbeat:true});const result=await collectGuardReadiness('D'.repeat(40),null,{heartbeatOnly:true,fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});
   assert.equal(result.schedulerReady,false);assert.equal(result.heartbeatVerified,true);assert.equal(result.requiresExactReservation,true);assert.equal(t.deletes.length,2);
+});
+test('preflight reuses fresh DO evidence after two current-version reads and opens no redundant tails',async()=>{
+ const t=transport({heartbeat:true}),cache=cachedReadiness(),before=structuredClone(cache);
+ const result=await collectPreflightHeartbeat('D'.repeat(40),{cachedReadiness:cache,fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});
+ assert.equal(result.schedulerReady,false);assert.equal(result.requiresExactReservation,true);assert.equal(t.calls.length,2);assert(t.calls.every(c=>c.url.endsWith('/deployments')));assert.equal(t.sockets.length,0);assert.equal(t.deletes.length,0);assert.deepEqual(cache,before);
+});
+test('invalid or missing caches fall back to authenticated live unarmed collection',async()=>{
+ for(const cached of [undefined,{...cachedReadiness(),phase:'failed'},(()=>{const c=cachedReadiness();c.guards.backup.eventTimestamp=now-90001;return c;})()]){
+  const t=transport({heartbeat:true}),result=await collectPreflightHeartbeat('D'.repeat(40),{cachedReadiness:cached,fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});assert.equal(result.schedulerReady,false);assert.equal(result.heartbeatVerified,true);assert.equal(t.sockets.length,2);assert.equal(t.deletes.length,2);
+ }
+});
+test('a deployment change during reuse forces fresh collection and never treats old ticks as current',async()=>{
+ const cache=cachedReadiness();cache.guards.primary.version='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';const t=transport({heartbeat:true});
+ const result=await collectPreflightHeartbeat('D'.repeat(40),{cachedReadiness:cache,fetchImpl:t.fetchImpl,now:()=>now,timeoutMs:100});assert.equal(result.guards.primary.version,versions[GUARDS.primary]);assert.equal(t.sockets.length,2);assert.equal(t.deletes.length,2);
 });
 test('trusted account configuration changes only the fixed Cloudflare account path',async()=>{
   const accountId='1'.repeat(32),t=transport();

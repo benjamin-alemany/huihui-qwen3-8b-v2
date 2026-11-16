@@ -1,4 +1,5 @@
 import manifest from './manifest.json' with {type:'json'};
+import hostInventory from './host-inventory.json' with {type:'json'};
 import {validateTarget} from '../cloudflare-backup/chat/hyperstack/policy.mjs';
 // Source review gate for one separately owner-approved acceptance candidate.
 // Private approval identity, durable single-create, budget and both guard gates
@@ -26,6 +27,13 @@ export const APPROVED_ACCEPTANCE_RELEASE=Object.freeze({
   "runtimeProfile": "vm-inference-v1"
 });
 export const ACCEPTED_PRODUCTION_RELEASE=null;
+// This separate source pin grants only a keyless native host inventory. It is
+// never a serving, CUDA, network-boundary or production approval.
+export function hostInventoryReleaseApproved(release){
+ return release?.id==='unjailed-host-inventory-v1'&&release.status==='candidate'&&
+  release.artifact?.runtimeProfile==='host-inventory-v1'&&release.artifact?.runtimeOrchestrator==='host-inventory-v1'&&
+  JSON.stringify(release)===JSON.stringify(hostInventory);
+}
 export function matchesReleasePin(release,pin){
  return !!(pin&&release&&release.schemaVersion===1&&['candidate','verified'].includes(release.status)&&
   pin.releaseId===release.id&&pin.servingImage===release.artifact?.servingImage&&
@@ -46,6 +54,7 @@ export function matchesReleasePin(release,pin){
   pin.runtimeProfile==='vm-inference-v1'&&pin.runtimeProfile===release.artifact?.runtimeProfile);
 }
 export function releaseApprovedFor(mode,release=manifest){
+ if(mode==='acceptance'&&hostInventoryReleaseApproved(release))return true;
  if(mode==='acceptance')return matchesReleasePin(release,APPROVED_ACCEPTANCE_RELEASE);
  if(mode==='production')return release?.status==='verified'&&matchesReleasePin(release,ACCEPTED_PRODUCTION_RELEASE);
  return false;
@@ -55,6 +64,10 @@ export function releaseApprovedFor(mode,release=manifest){
 // copy changes flavor. Production continues to require its separate exact pin.
 export function acceptanceReleaseForTarget({target,release=manifest}={}){
  let selected;try{selected=validateTarget(target);}catch{throw Error('HYPERSTACK_ACCEPTANCE_TARGET_UNAPPROVED');}
+ if(hostInventoryReleaseApproved(release)){
+  if(selected.imageId!==517||selected.imageName!==release.hosting.vmImageName||selected.flavorId!==100||selected.flavorName!=='n3-A100x1'||selected.region!=='CANADA-1'||selected.maximumHourlyUSD>1.36)throw Error('HYPERSTACK_ACCEPTANCE_TARGET_UNAPPROVED');
+  return structuredClone(release);
+ }
  const profile=APPROVED_ACCEPTANCE_TARGETS.find(p=>p.flavor===selected.flavorName&&p.region===selected.region&&p.vmImageId===selected.imageId);
  if(!releaseApprovedFor('acceptance',release)||!profile||selected.maximumHourlyUSD>profile.maximumHourlyUSD||
   release.model?.repository!=='huihui-ai/Huihui-Qwen3-8B-abliterated-v2'||release.model?.revision!=='7d89db76029281fd8f3e6698a8e30738608105a9'||release.model?.servedName!=='huihui-qwen3-8b-v2')throw Error('HYPERSTACK_ACCEPTANCE_TARGET_UNAPPROVED');

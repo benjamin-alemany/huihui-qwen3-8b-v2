@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "unjailed-host-inventory-v1",
+  "status": "candidate",
+  "model": {
+    "repository": "huihui-ai/Huihui-Qwen3-8B-abliterated-v2",
+    "revision": "7d89db76029281fd8f3e6698a8e30738608105a9",
+    "servedName": "huihui-qwen3-8b-v2"
+  },
+  "artifact": {
+    "servingImage": "ghcr.io/benjamin-alemany/huihui-qwen3-8b-v2@sha256:86b61fca502d259910c36ec372c31adf59e0fb4495371904acc20f6bde535278",
+    "runtimeProfile": "host-inventory-v1",
+    "bootstrapLockSha256": "6cdcd2d809bcdae41f146537f56649f0c30fc2529ed97e463f2a00012f6fe34f",
+    "bootstrapBundleSha256": "6cdcd2d809bcdae41f146537f56649f0c30fc2529ed97e463f2a00012f6fe34f",
+    "bootstrapSourceCommit": "6a1e83d618bb76194c0632a71c10ba43ea60692a",
+    "bootstrapBundleSize": 42973,
+    "runtimeOrchestrator": "host-inventory-v1"
+  },
+  "hosting": {
+    "provider": "hyperstack",
+    "ownershipPolicy": "nonce-name-v2",
+    "flavor": "n3-A100x1",
+    "region": "CANADA-1",
+    "vmImageId": 517,
+    "vmImageName": "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker",
+    "driverBranch": 570
+  },
+  "inference": {
+    "origin": "https://inference.unjailed.work",
+    "completionPath": "/v1/chat/completions",
+    "healthPath": "/health"
+  },
+  "sessions": {
+    "allowedMinutes": [
+      15,
+      30,
+      60
+    ],
+    "defaultMinutes": 30,
+    "maximumStartupMinutes": 15,
+    "backupDelayMinutes": 1,
+    "cleanupMarginMinutes": 5
+  }
+}

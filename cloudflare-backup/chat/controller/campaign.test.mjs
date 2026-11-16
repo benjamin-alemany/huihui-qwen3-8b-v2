@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SCALE} from './session-policy.mjs';
-import {parseTestCampaign,reconcileCampaign,campaignBinding,campaignStart,campaignBeforeCreate,campaignPostReady,campaignObserve,campaignFinish,campaignView} from './campaign.mjs';
+import {parseTestCampaign,reconcileCampaign,campaignBinding,campaignQuoteReady,campaignStart,campaignBeforeCreate,campaignPostReady,campaignObserve,campaignFinish,campaignView} from './campaign.mjs';
 const NOW=Date.parse('2026-01-01T00:00:00Z'),ID='00000000-0000-4000-8000-000000000001';
 const policy=(patch={})=>parseTestCampaign(JSON.stringify({version:1,id:ID,validFrom:NOW,expiresAt:NOW+86400000,maxStarts:20,maxPosts:5,maxAllocations:3,capUSD:5,...patch}));
 const target=(a100=false)=>({region:'CANADA-1',flavorName:a100?'n3-A100x1':'n3-RTX-A6000x1',maximumHourlyUSD:a100?1.36:.507});
@@ -49,4 +49,61 @@ test('profile caps and owner status projection cannot disclose child approvals, 
  const r=record(),p=policy(),s=session(1,p);r.campaignReconciliation=reconcileCampaign(r,p,true);s.quote.maximumUSD=.36;assert.throws(()=>campaignStart(r,s,{policy:p,required:true,target:target(),now:NOW}),/CAMPAIGN_PROFILE_MISMATCH/);
  const valid=begin(r,p,2);valid.approval='DUMMY_PRIVATE_SECRET';assert(!JSON.stringify(campaignView(r,p,true,NOW)).includes('DUMMY_PRIVATE_SECRET'));assert(!JSON.stringify(campaignView(r,p,true,NOW)).includes('dummy-session'));
  assert.equal(campaignView(record(),null,true,NOW).code,'CAMPAIGN_REQUIRED');
+});
+const BASELINE=19638881734,ADDITIONAL=17000000000,NEW_ID='00000000-0000-4000-8000-000000000002';
+const boundedPolicy=(patch={})=>policy({id:NEW_ID,maxStarts:10,maxPosts:3,maxAllocations:2,spentBaselineUnits:BASELINE,maximumAdditionalSpendUnits:ADDITIONAL,...patch});
+const boundedRecord=()=>{const r=record();r.ledger.spent=BASELINE;return r;};
+function boundedSession(n,p,holdUnits=8500000000){const s=session(n,p,true);s.quote.holdUnits=holdUnits;s.quote.maximumUSD=holdUnits/SCALE;return s;}
+function startBounded(r,p,n,holdUnits=8500000000){
+ r.campaignReconciliation=reconcileCampaign(r,p,true);const s=boundedSession(n,p,holdUnits);campaignStart(r,s,{policy:p,required:true,target:target(true),now:NOW});r.ledger.held+=holdUnits;r.session=s;return s;
+}
+test('optional incremental spend policy is paired, integer-bounded and leaves old canonical policies unchanged',()=>{
+ const p=boundedPolicy();assert.equal(p.spentBaselineUnits,BASELINE);assert.equal(p.maximumAdditionalSpendUnits,ADDITIONAL);
+ const legacy=policy();assert(!Object.hasOwn(legacy,'spentBaselineUnits'));assert.equal(campaignBinding(legacy),JSON.stringify({version:1,id:ID,validFrom:NOW,expiresAt:NOW+86400000,maxStarts:20,maxPosts:5,maxAllocations:3,capUSD:5}));
+ for(const patch of [{spentBaselineUnits:undefined},{maximumAdditionalSpendUnits:undefined},{spentBaselineUnits:-1},{spentBaselineUnits:1.1},{maximumAdditionalSpendUnits:0},{maximumAdditionalSpendUnits:-1},{maximumAdditionalSpendUnits:1.1},{maximumAdditionalSpendUnits:Number.MAX_SAFE_INTEGER},{spentBaselineUnits:4*SCALE,maximumAdditionalSpendUnits:2*SCALE},{spentBaselineUnits:'19638881734'}])assert.throws(()=>boundedPolicy(patch),/CAMPAIGN_INVALID/);
+ assert.equal(boundedPolicy({spentBaselineUnits:0,maximumAdditionalSpendUnits:5*SCALE}).maximumAdditionalSpendUnits,5*SCALE);
+});
+test('new grant keeps historical records and baseline immutable across eviction and policy redeployment',()=>{
+ let r=boundedRecord();const old=policy();r.campaignReconciliation=reconcileCampaign(r,old,true);const oldState=structuredClone(r.testCampaigns[ID]),ledger=structuredClone(r.ledger),p=boundedPolicy();
+ r.campaignReconciliation=reconcileCampaign(r,p,true);assert.deepEqual(r.testCampaigns[ID],oldState);assert.deepEqual(r.ledger,ledger);
+ const s=startBounded(r,p,1);claim(r,p,s,true);campaignObserve(r,s,[{id:'99'}]);s.knownPodIds=['99'];campaignFinish(r,s,'stopped');s.phase='stopped';r.ledger.held=0;r.ledger.spent+=8500000000;
+ r=structuredClone(r);assert.equal(reconcileCampaign(r,p,true).ready,true);assert.equal(r.testCampaigns[NEW_ID].policy.spentBaselineUnits,BASELINE);assert.equal(r.testCampaigns[NEW_ID].allocationsUsed,1);assert.deepEqual(r.testCampaigns[ID],oldState);
+ for(const changed of [boundedPolicy({spentBaselineUnits:BASELINE+1}),boundedPolicy({maximumAdditionalSpendUnits:ADDITIONAL+1})])assert.equal(reconcileCampaign(r,changed,true).code,'CAMPAIGN_CHANGED');
+ const view=campaignView(r,p,true,NOW);assert.equal(view.additionalSpentUpperUSD,.85);assert.equal(view.additionalReservedUSD,0);assert.equal(view.additionalRemainingUSD,.85);assert.equal(view.spentBaselineUSD,BASELINE/SCALE);assert.equal(view.maximumAdditionalSpendUSD,1.7);
+});
+test('Quote and Start count a prospective hold once; durable create and POST count that existing hold once',()=>{
+ const r=boundedRecord(),p=boundedPolicy(),q=boundedSession(1,p).quote;
+ r.campaignReconciliation=reconcileCampaign(r,p,true);const before=structuredClone(r.ledger);
+ campaignQuoteReady(r,{policy:p,required:true,target:target(true),quote:q,now:NOW});assert.deepEqual(r.ledger,before);assert.equal(r.testCampaigns[NEW_ID].startsUsed,0);
+ const first=startBounded(r,p,1);claim(r,p,first,true);assert.deepEqual(campaignPostReady(r,first,{policy:p,required:true,target:target(true),now:NOW,childApprovalId:first.approval}),{expiresAt:p.expiresAt});
+ campaignObserve(r,first,[{id:'101'}]);first.knownPodIds=['101'];campaignFinish(r,first,'stopped');first.phase='stopped';r.ledger.held=0;r.ledger.spent+=8500000000;
+ campaignQuoteReady(r,{policy:p,required:true,target:target(true),quote:boundedSession(2,p).quote,now:NOW});
+ const second=startBounded(r,p,2);assert.equal(r.ledger.spent+r.ledger.held,BASELINE+ADDITIONAL);claim(r,p,second,true);assert.deepEqual(campaignPostReady(r,second,{policy:p,required:true,target:target(true),now:NOW,childApprovalId:second.approval}),{expiresAt:p.expiresAt});
+ assert.equal(r.testCampaigns[NEW_ID].postsUsed,2);assert.equal(campaignView(r,p,true,NOW).additionalRemainingUSD,0);
+});
+test('new allowance includes actual spend overrun and every existing hold, independently of five-dollar headroom',()=>{
+ const p=boundedPolicy();
+ for(const held of [0,1000000000]){
+  const r=boundedRecord();r.ledger.spent=BASELINE+9000000000;r.ledger.held=held;r.campaignReconciliation=reconcileCampaign(r,p,true);const s=boundedSession(1,p);
+  assert(r.ledger.cap-r.ledger.spent-r.ledger.held>s.quote.holdUnits);
+  assert.throws(()=>campaignQuoteReady(r,{policy:p,required:true,target:target(true),quote:s.quote,now:NOW}),/CAMPAIGN_SPEND_LIMIT/);
+  assert.throws(()=>campaignStart(r,s,{policy:p,required:true,target:target(true),now:NOW}),/CAMPAIGN_SPEND_LIMIT/);assert.equal(r.testCampaigns[NEW_ID].startsUsed,0);
+ }
+ const r=boundedRecord();r.ledger.spent=BASELINE-1;r.campaignReconciliation=reconcileCampaign(r,p,true);assert.equal(campaignView(r,p,true,NOW).code,'CAMPAIGN_SPEND_BASELINE_MISMATCH');assert.equal(r.ledger.spent,BASELINE-1);
+});
+test('pre-create and post-bootstrap barriers recheck the spend ceiling and reject missing or inconsistent holds',()=>{
+ const p=boundedPolicy();
+ const r=boundedRecord(),s=startBounded(r,p,1,8000000000);r.ledger.spent=BASELINE+9000000001;assert.throws(()=>claim(r,p,s,true),/CAMPAIGN_SPEND_LIMIT/);assert.equal(r.testCampaigns[NEW_ID].postsUsed,0);
+ const r2=boundedRecord(),s2=startBounded(r2,p,1,8000000000);claim(r2,p,s2,true);r2.ledger.spent=BASELINE+9000000001;
+ const options={policy:p,required:true,target:target(true),now:NOW,childApprovalId:s2.approval};assert.throws(()=>campaignPostReady(r2,s2,options),/CAMPAIGN_SPEND_LIMIT/);assert.equal(r2.testCampaigns[NEW_ID].postsUsed,1);
+ r2.ledger.spent=BASELINE;r2.ledger.held=7999999999;assert.throws(()=>campaignPostReady(r2,s2,options),/CAMPAIGN_BUDGET_MISMATCH/);
+ const r3=boundedRecord(),s3=boundedSession(1,p);r3.campaignReconciliation=reconcileCampaign(r3,p,true);s3.quote.holdUnits--;assert.throws(()=>campaignStart(r3,s3,{policy:p,required:true,target:target(true),now:NOW}),/CAMPAIGN_BUDGET_MISMATCH/);
+});
+test('spend exhaustion blocks new work but never prevents expired-campaign teardown or refunds observed allocation slots',()=>{
+ const r=boundedRecord(),p=boundedPolicy(),s=startBounded(r,p,1);claim(r,p,s,true);campaignObserve(r,s,[{id:'102'}]);s.knownPodIds=['102'];r.ledger.spent=BASELINE+ADDITIONAL;
+ assert.equal(campaignView(r,p,true,NOW).code,'CAMPAIGN_SPEND_LIMIT');assert.throws(()=>campaignPostReady(r,s,{policy:p,required:true,target:target(true),now:NOW,childApprovalId:s.approval}),/CAMPAIGN_SPEND_LIMIT/);
+ // The existing cleanup entry point deliberately has no current-policy spend
+ // or time gate: even an overrun must be recorded and torn down promptly.
+ campaignFinish(r,s,'stopped');s.phase='stopped';r.ledger.held=0;
+ assert.equal(r.testCampaigns[NEW_ID].allocationsUsed,1);assert.equal(r.testCampaigns[NEW_ID].attempts[0].closed,true);assert.equal(r.testCampaigns[NEW_ID].policy.spentBaselineUnits,BASELINE);assert.equal(campaignView(r,p,true,p.expiresAt).code,'CAMPAIGN_EXPIRED');
 });

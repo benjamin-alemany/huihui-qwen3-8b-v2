@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "kind": "cuda-compat-13-0-v1",
+  "directory": "/usr/local/cuda-13.0/compat",
+  "sourceImage": "vllm/vllm-openai@sha256:6ee133356d49ed24cee03dd0cda3d3980279a11c107ce3e752c89e76540f41c9",
+  "package": {
+    "architecture": "amd64",
+    "name": "cuda-compat-13-0",
+    "version": "580.95.05-0ubuntu1"
+  },
+  "reviewed": true,
+  "files": {
+    "libcuda.so.580.95.05": {
+      "size": 96276264,
+      "sha256": "f27223c58d4c0d2ead3c2d747eb30a530c449f89c42e16b23e9bef04f3e6dc2e"
+    },
+    "libcudadebugger.so.580.95.05": {
+      "size": 10444456,
+      "sha256": "1b8e052c05e80fc1d3dcc0c3726663030ae6086d995b28c7f2ec74bbc6a75c1c"
+    },
+    "libnvidia-gpucomp.so.580.95.05": {
+      "size": 72261240,
+      "sha256": "fed07509a32109353019290a4b446e5108c125589cfd479ad9f6d241af59a9c4"
+    },
+    "libnvidia-nvvm.so.580.95.05": {
+      "size": 78109032,
+      "sha256": "1f6ae66227c1efcab6e9bd8f207da9730b502217a95ce78c04e181f2e4b17353"
+    },
+    "libnvidia-nvvm70.so.4": {
+      "size": 24829456,
+      "sha256": "64e62bd2f763c575418bb7d660e8715c57d49ef66640a2385896324238896acd"
+    },
+    "libnvidia-pkcs11-openssl3.so.580.95.05": {
+      "size": 14336,
+      "sha256": "720c3f2b9887232d6906e31c227caed7d8b289f6a085f8d154de558165dd4cbd"
+    },
+    "libnvidia-ptxjitcompiler.so.580.95.05": {
+      "size": 39422584,
+      "sha256": "9de90cfee1491365d6e60dd5365d65cc2a8441f2e21e354ca64db9cd79717265"
+    }
+  },
+  "symlinks": {
+    "libcuda.so": "libcuda.so.1",
+    "libcuda.so.1": "libcuda.so.580.95.05",
+    "libcudadebugger.so.1": "libcudadebugger.so.580.95.05",
+    "libnvidia-nvvm.so": "libnvidia-nvvm.so.4",
+    "libnvidia-nvvm.so.4": "libnvidia-nvvm.so.580.95.05",
+    "libnvidia-ptxjitcompiler.so.1": "libnvidia-ptxjitcompiler.so.580.95.05"
+  }
+}

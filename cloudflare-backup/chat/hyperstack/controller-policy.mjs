@@ -13,14 +13,15 @@ const finite=n=>typeof n==='number'&&Number.isFinite(n);
 export function hyperstackLifecycle({target,release}={}){
   let t;try{t=validateTarget(target);}catch{reject('HYPERSTACK_TARGET_UNVERIFIED',503);}
   const profile=targetProfile(t);
+  const inventoryOnly=release?.artifact?.runtimeProfile==='host-inventory-v1'&&release?.artifact?.runtimeOrchestrator==='host-inventory-v1'&&t.imageId===517&&t.flavorId===100&&t.flavorName==='n3-A100x1';
   // A fully pinned candidate may be used for a separately approved acceptance
   // test. It is not equivalent to a verified production release or authorization
   // to run one. Root deployment/acceptance gates remain independent.
   if(!release||release.schemaVersion!==1||!['candidate','verified'].includes(release.status)||
     !imagePattern.test(release.artifact?.servingImage??'')||!/^[a-f0-9]{64}$/.test(release.artifact?.bootstrapLockSha256??'')||!/^[a-f0-9]{64}$/.test(release.artifact?.bootstrapBundleSha256??'')||!/^[a-f0-9]{40}$/.test(release.artifact?.bootstrapSourceCommit??'')||!Number.isSafeInteger(release.artifact?.bootstrapBundleSize)||release.artifact.bootstrapBundleSize<=0||release.artifact.bootstrapBundleSize>256*1024||
-    release.artifact?.runtimeProfile!=='vm-inference-v1'||![undefined,null,'vm-run-v1'].includes(release.artifact?.runtimeOrchestrator)||release.hosting?.provider!==PROVIDER||
+    !(inventoryOnly||release.artifact?.runtimeProfile==='vm-inference-v1'&&[undefined,null,'vm-run-v1'].includes(release.artifact?.runtimeOrchestrator))||release.hosting?.provider!==PROVIDER||
     release.hosting?.vmImageId!==t.imageId||release.hosting?.vmImageName!==t.imageName||
-    release.hosting?.flavor!==t.flavorName||release.hosting?.region!==t.region||release.hosting?.driverBranch!==580||release.hosting?.ownershipPolicy!=='nonce-name-v2'||
+    release.hosting?.flavor!==t.flavorName||release.hosting?.region!==t.region||release.hosting?.driverBranch!==(inventoryOnly?570:580)||release.hosting?.ownershipPolicy!=='nonce-name-v2'||
     release.inference?.origin!==INFERENCE_ORIGIN||release.inference?.completionPath!=='/v1/chat/completions'||release.inference?.healthPath!=='/health'||
     release.model?.repository!=='huihui-ai/Huihui-Qwen3-8B-abliterated-v2'||release.model?.revision!=='7d89db76029281fd8f3e6698a8e30738608105a9'||release.model?.servedName!=='huihui-qwen3-8b-v2'||
     release.sessions?.allowedMinutes?.join()!==durations.join()||release.sessions?.defaultMinutes!==30||release.sessions?.backupDelayMinutes!==1||release.sessions?.cleanupMarginMinutes!==5||release.sessions?.maximumStartupMinutes!==15)reject('HYPERSTACK_RELEASE_UNPINNED',503);
@@ -80,6 +81,7 @@ export function hyperstackLifecycle({target,release}={}){
       return structuredClone(q);
     },
     context(s){
+      if(inventoryOnly)reject('HYPERSTACK_INVENTORY_ONLY',503);
       const q=reservationChecked(s?.reservation);validate(s?.pod,q,s?.quote?.gpuHourlyUSD);
       if(s.phase!=='ready'||s.stopRequested||s.nonce!==q.nonce||s.bootAt!==q.createdNotBefore||s.deadline!==q.deadline||s.quote?.minutes!==q.minutes||!/^[A-Za-z0-9_-]{43,128}$/.test(s.inferenceKey??''))reject('HYPERSTACK_CONTEXT_INVALID',503);
       return {CHAT_ENABLED:'true',CHAT_SESSION:JSON.stringify({provider:PROVIDER,vmId:s.pod.id,createdAt:new Date(s.bootAt).toISOString(),nonce:s.nonce,minutes:q.minutes}),INFERENCE_API_KEY:s.inferenceKey};

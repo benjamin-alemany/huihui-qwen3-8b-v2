@@ -1,7 +1,7 @@
 import {applyOperatorBudget} from './budget-reconcile.mjs';
 import {safePreflightFailure} from './preflight-failure.mjs';
 import {safeCreateDiagnostics} from '../hyperstack/client.mjs';
-import {reconcileCampaign,campaignBinding,campaignView,campaignStart,campaignBeforeCreate,campaignObserve,campaignFinish} from './campaign.mjs';
+import {reconcileCampaign,campaignBinding,campaignView,campaignQuoteReady,campaignStart,campaignBeforeCreate,campaignObserve,campaignFinish} from './campaign.mjs';
 import {safeDiagnosticReceipt} from '../hyperstack/host-diagnostics.mjs';
 import {SEED,SCALE,SessionError,terminal,catalogFrom,makeQuote,reservation,podMatches,validatePod,createBody,safeSession,budgetView,ordinaryBudgetView,parseGrant,quoteMinutes,sessionMinutes,startupMinutes,receiptFresh,IMAGE,GPU,DISK_GB} from './session-policy.mjs';
 const recordKey='session-ledger-v1';
@@ -62,7 +62,7 @@ export class SessionEngine {
     // target rate. Legacy Runpod retains its existing one-dollar ceiling.
     const targetCeiling=this.lifecycle.provider==='hyperstack'?(this.lifecycle.target?.maximumHourlyUSD??1):1;
     if(!Number.isFinite(ceiling)||ceiling<=0||!Number.isFinite(targetCeiling)||targetCeiling<=0||ceiling>targetCeiling||catalog.totalHourly>ceiling)throw new SessionError('PRICE_CHANGED');
-    return this.tx(r=>{r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,lifecycleBinding:undefined,campaignBinding:undefined,launchEnabled:this.launchEnabled(r),...this.views(r),includes:q.includes??'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:q.excludes??'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
+    return this.tx(r=>{if(this.budgetKind()==='test')campaignQuoteReady(r,{policy:this.d.campaign,required:this.d.campaignRequired===true,target:this.lifecycle.target,quote:q,now:this.d.now()});r.quotes=[...r.quotes.slice(-19),q];return {...q,holdUnits:undefined,lifecycleBinding:undefined,campaignBinding:undefined,launchEnabled:this.launchEnabled(r),...this.views(r),includes:q.includes??'GPU, 60 GB temporary disk, cold start and 5-minute stop/cleanup margin',excludes:q.excludes??'Tax/FX if applicable; existing domain; provider outages can exceed operational allowance'};});
   }
   async start(input){
     if(!input||Object.keys(input).sort().join()!=='maximumUSD,quoteId'||typeof input.quoteId!=='string')throw new SessionError('INVALID_START',400);

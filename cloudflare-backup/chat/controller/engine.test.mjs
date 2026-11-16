@@ -27,6 +27,17 @@ function harness(){
   return {store,deps,engine,calls,guardState,provider,set(o){if(o.now!==undefined)now=o.now;if(o.health!==undefined)health=o.health;if(o.clean!==undefined)clean=o.clean;if(o.createError!==undefined)createError=o.createError;if(o.price!==undefined)quotePrice=o.price;if(o.stock!==undefined)stock=o.stock;if(o.pods!==undefined)pods=o.pods;if(o.otherPods!==undefined)otherPods=o.otherPods;if(o.proofFail!==undefined)proofFail=o.proofFail;if(o.heartbeatFail!==undefined)heartbeatFail=o.heartbeatFail;if(o.disarmFail!==undefined)disarmFail=o.disarmFail;if(o.armFail!==undefined)armFail=o.armFail;if(o.versionsFail!==undefined)versionsFail=o.versionsFail;},advance:ms=>now+=ms,get now(){return now;},get pods(){return pods;},get creates(){return createCalls;},
     async start(input){const q=await engine().quote(input);await engine().start({quoteId:q.id,maximumUSD:q.maximumUSD});return q;},async ready(input){await this.start(input);await engine().tick();await engine().tick();await engine().tick();return (await engine().status()).session;}};
 }
+test('fresh campaign incremental allowance blocks quote and Start before reserving or consuming an attempt',async()=>{
+ const h=harness(),baseline=19638881734,hold=7914202509;
+ h.deps.campaign={version:1,id:'11111111-1111-4111-8111-111111111111',validFrom:h.now,expiresAt:h.now+86400000,maxStarts:10,maxPosts:3,maxAllocations:2,capUSD:5,spentBaselineUnits:baseline,maximumAdditionalSpendUnits:17000000000};h.deps.campaignRequired=true;h.deps.maxHourly=1.36;h.deps.maxUSD=.85;
+ h.deps.lifecycle={provider:'hyperstack',binding:'DUMMY_PREPARED_A100',target:{flavorName:'n3-A100x1',region:'CANADA-1',maximumHourlyUSD:1.36},quoteMinutes:()=>30,catalogFrom:()=>({totalHourly:1.35672043}),makeQuote:(_c,now,id)=>({id,provider:'hyperstack',gpu:'A100-80G-PCIe',minutes:30,totalHourlyUSD:1.35672043,maximumUSD:hold/1e10,holdUnits:hold,availability:'AVAILABLE',quotedAt:now,expiresAt:now+60000})};
+ await h.store.put('session-ledger-v1',{ledger:{...structuredClone(SEED),cap:50000000000,spent:baseline,held:0},session:null,quotes:[]});
+ const q=await h.engine().quote();let record=await h.engine().read();assert.equal(record.quotes.length,1);assert.equal(record.ledger.held,0);assert.equal(record.testCampaigns[h.deps.campaign.id].startsUsed,0);
+ record.ledger.spent=baseline+10000000000;await h.store.put('session-ledger-v1',record);
+ await assert.rejects(h.engine().quote(),e=>e.code==='CAMPAIGN_SPEND_LIMIT');
+ await assert.rejects(h.engine().start({quoteId:q.id,maximumUSD:q.maximumUSD}),e=>e.code==='CAMPAIGN_SPEND_LIMIT');
+ record=await h.engine().read();assert.equal(record.quotes.length,1);assert.equal(record.session,null);assert.equal(record.ledger.held,0);assert.equal(record.testCampaigns[h.deps.campaign.id].startsUsed,0);assert.equal(h.creates,0);
+});
 test('current guard proof commits before create and owner evidence never includes raw tail/control secrets',async()=>{
  const h=harness(),receipts=h.deps.receipts,create=h.provider.create;
  h.deps.receipts=async q=>{const proof=await receipts(q);proof.rawTail='DUMMY_PRIVATE_TAIL_URL';proof.apiKey='DUMMY_PRIVATE_CONTROL_KEY';for(const g of Object.values(proof.guards))g.rawFrame='DUMMY_PRIVATE_RAW_FRAME';return proof;};

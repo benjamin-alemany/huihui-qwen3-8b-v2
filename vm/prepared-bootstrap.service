@@ -1,0 +1,17 @@
+[Unit]
+Description=Validate the exact prepared GPU host before one sealed session
+After=network-online.target
+Wants=network-online.target
+Before=unjailed-runtime.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I -B /opt/unjailed/vm/prepared_bootstrap.py --execute
+User=root
+UMask=0077
+PrivateTmp=true
+NoNewPrivileges=true
+RemainAfterExit=true
+Restart=no
+TimeoutStartSec=900
+[Install]
+WantedBy=multi-user.target
