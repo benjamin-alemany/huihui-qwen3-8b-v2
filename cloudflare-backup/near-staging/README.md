@@ -1,0 +1,20 @@
+# Encrypted NEAR Qwen staging
+
+Tracked by [EMP-74](https://linear.app/emporiopartners/issue/EMP-74/prove-encrypted-near-qwen-chat-in-owner-only-staging). Use the isolated `unjailed-near-staging` Worker at `near-staging.unjailed.work` with its own self-hosted Cloudflare Access application and audience. The existing Cloudflare account, owner identity and email sign-in can be reused. Do not reuse the production audience, storage namespaces, or service bindings. The checked-in config has no routes, login settings or secret values, and paid inference is disabled.
+
+## Build and check
+
+From `cloudflare-backup`, use the package lock and install scripts disabled. Run `npm run build:near-staging`, `npm run test:near-staging`, and Wrangler deploy with `--dry-run --config wrangler.near-staging.jsonc`. The staging bundle reuses the existing chat layout and stylesheet and does not load the production autosave, recovery or GPU code.
+
+Before routing traffic, provision an owner-only Access policy at the exact staging hostname. Supply the staging-only `ACCESS_ISSUER`, `ACCESS_AUD` and `OWNER_EMAIL` variables outside Git. Disable public preview and workers.dev URLs and keep observability disabled. The Worker verifies the signed owner identity itself for all routes, including static assets. Use **Workers & Pages → unjailed-near-staging → Settings → Variables and Secrets → Add → Secret** to put a dedicated NEAR credential in `NEAR_API_KEY`. Do not add it to the browser bundle, Git, Linear, or chat.
+
+## Live acceptance
+
+1. With inference disabled, check that a signed-out browser is denied or redirected to Access. Sign in as the owner and verify fresh evidence with the UI button. The cryptographic policy requires Intel UpToDate at both endpoints and verified GPU evidence at the model.
+2. Obtain explicit approval for the two-completion test before setting `NEAR_STAGING_ENABLED=true` in staging. Use existing credits only. The staging quota atomically consumes a slot before each upstream completion, including attempts with an uncertain outcome, and records only a count. The fixture has at most 1,024 context characters and 256 output tokens per completion. There are no automatic generation retries.
+3. Send dummy text containing an invented phrase and ask for it back on the second turn without repeating it. Confirm the first and second requests contain encrypted envelopes for 1 and 3 messages respectively. Confirm both raw responses on the network contain encrypted message content and that both replies appear only after verified model signatures. Watch for readable messages and replies in Worker errors, output, and storage. Save only a redacted result with statuses, field counts and outcomes.
+4. Confirm that an invalid envelope, wrong model, non-owner request and invalid or ambiguous signature fail closed. Reload and verify that the tab has no chat history. Disable staging inference when the test ends.
+
+The browser SDK creates a fresh reply key each time and uses E2EE v3, which authenticates that reply key with the outbound message ciphertext. The relay sends the exact ciphertext bytes and pins the upstream host and model without aliases. The browser also requires a unique preflight model signer and a model-level signature over the request and response. Ciphertext shape checks in the relay are defense in depth. They do not replace authenticated decryption in the browser.
+
+The model key and fresh challenge are verified through Intel TDX evidence, with measured configuration and NVIDIA GPU evidence verified according to the SDK policy. The browser verifier cannot establish same-connection TLS certificate binding to the gateway through a Cloudflare relay. The model signer is shared across instances. The test establishes neither exact instance or image provenance nor independent inspection of all code handling plaintext inside the enclave. Cloudflare serves the browser bundle and sees connection and request metadata. NEAR sees routing and usage metadata. These limits also apply after a successful live test.

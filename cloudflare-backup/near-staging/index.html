@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Unjailed · Encrypted chat staging</title>
+  <link rel="stylesheet" href="../chat/site/style.css">
+  <script src="./app.mjs" type="module"></script>
+</head>
+<body><main>
+  <header><strong>UNJAILED</strong><span>Private Qwen chat</span><span class="pill">Staging</span></header>
+  <section class="intro">
+    <h1>A space to think.</h1>
+    <button id="verify" type="button">Verify model evidence</button>
+    <p>Dummy text only. This test allows two replies. Closing or reloading the tab clears the conversation.</p>
+  </section>
+  <section id="messages" aria-label="Conversation" aria-live="polite">
+    <p id="empty" class="muted">Your conversation will appear here.</p>
+  </section>
+  <form id="composer" autocomplete="off">
+    <label for="message">Message Qwen</label>
+    <textarea id="message" rows="4" maxlength="256" required disabled></textarea>
+    <div class="actions">
+      <span id="notice" role="status">Loading encrypted chat…</span>
+      <button id="send" disabled>Send message</button>
+    </div>
+  </form>
+  <div class="secondary"><a href="/cdn-cgi/access/logout">Sign out</a></div>
+</main></body>
+</html>
