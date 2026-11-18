@@ -33,8 +33,12 @@ verify.addEventListener('click', async () => {
   try {
     await verifyStagingModel(location.origin);
     notice.textContent = 'Gateway and model evidence verified. No chat request was sent.';
-  } catch {
-    notice.textContent = 'Model evidence could not be verified.';
+  } catch (error) {
+    const code = error?.failure?.code;
+    const status = error?.failure?.details?.status;
+    const resource = error?.failure?.details?.resource;
+    const diagnostic = typeof code === 'string' && /^[a-z_]+\.[a-z_]+$/.test(code) ? ' ' + code : '';
+    notice.textContent = 'Model evidence could not be verified.' + diagnostic + (/^[a-z_]+$/.test(resource ?? '') ? ' ' + resource : '') + (Number.isInteger(status) ? ' HTTP ' + status : '');
   } finally {
     busy = false;
     update();

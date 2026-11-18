@@ -61,7 +61,7 @@ function evidenceURL(url) {
   return upstream;
 }
 
-export function stagingRelay({ verifyOwner = authenticate, fetchUpstream = fetch } = {}) {
+export function stagingRelay({ verifyOwner = authenticate, fetchUpstream = (url, options) => fetch(url, options) } = {}) {
   return async (request, env) => {
     const url = new URL(request.url);
     if (url.origin !== STAGING_ORIGIN || !await verifyOwner(request, env)) return fail(403);
@@ -77,7 +77,7 @@ export function stagingRelay({ verifyOwner = authenticate, fetchUpstream = fetch
       const inference = request.method === 'POST' && url.pathname === '/v1/chat/completions' && !url.search;
       const upstream = inference ? new URL(UPSTREAM + url.pathname) : request.method === 'GET' && evidenceURL(url);
       if (!upstream) return fail(404);
-      const headers = new Headers({Accept: 'application/json', 'x-no-aliasing': 'true'});
+      const headers = new Headers({Accept: 'application/json', 'x-no-aliasing': 'true', 'Cache-Control': 'no-store'});
       let body;
       if (inference) {
         if (env.NEAR_STAGING_ENABLED !== 'true' || !env.NEAR_API_KEY || !mutationAllowed(request, STAGING_ORIGIN)) return fail(403);
@@ -98,13 +98,20 @@ export function stagingRelay({ verifyOwner = authenticate, fetchUpstream = fetch
         if (env.NEAR_STAGING_ENABLED !== 'true' || !env.NEAR_API_KEY) return fail(403);
         headers.set('Authorization', 'Bearer ' + env.NEAR_API_KEY);
       }
-      const response = await fetchUpstream(upstream, {
-        method: request.method, headers, body, redirect: 'error', cache: 'no-store',
-        signal: AbortSignal.timeout(60_000),
-      });
+      let response;
+      try {
+        response = await fetchUpstream(upstream, {
+          method: request.method, headers, body, redirect: 'manual',
+          signal: AbortSignal.timeout(60_000),
+        });
+      } catch (error) {
+        if (inference || signaturePath.test(url.pathname)) return fail(502);
+        return fail(error instanceof TypeError ? 520 : 521);
+      }
       if (!response.ok) {
         await response.body?.cancel();
-        return fail(502);
+        const publicEvidence = !inference && !signaturePath.test(url.pathname);
+        return fail(publicEvidence ? (response.status >= 400 ? response.status : 424) : 502);
       }
       const parsed = await readJSON(response.body, inference ? 65_536 : 1_048_576);
       if (inference && !encryptedReply(parsed.value)) return fail(502);

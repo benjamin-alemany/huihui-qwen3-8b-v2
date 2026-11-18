@@ -55,7 +55,7 @@ test('both turns preserve ciphertext in every context message and the reply', as
     assert.equal(new TextDecoder().decode(options.body), body);
     assert.equal(options.headers.get('Authorization'), 'Bearer fixture-only');
     assert.equal(options.headers.get('x-no-aliasing'), 'true');
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
   }
   assert.equal((await relay(request(first))).status, 429);
   assert.equal(calls.length, 2);
