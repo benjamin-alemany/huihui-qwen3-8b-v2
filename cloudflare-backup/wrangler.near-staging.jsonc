@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unjailed-near-staging",
+  "main": "near-staging/worker.mjs",
+  "compatibility_date": "2026-10-30",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "near-staging/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": false,
+    "logs": {"enabled": false, "invocation_logs": false},
+    "traces": {"enabled": false}
+  },
+  "durable_objects": {
+    "bindings": [{"name": "STAGING_QUOTA", "class_name": "StagingQuota"}]
+  },
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["StagingQuota"]}],
+  "vars": {"NEAR_STAGING_ENABLED": "false"}
+}
